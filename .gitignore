@@ -1,0 +1,10 @@
+.clj-kondo
+.cpcache
+.lsp
+.vscode
+.calva
+.nrepl-port
+.shadow-cljs
+.DS_Store
+node_modules
+/demo/pub/js

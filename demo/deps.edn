@@ -1,0 +1,4 @@
+{:paths ["."]
+ :deps {binaryage/devtools {:mvn/version "1.0.5"}
+        zero/zero {:local/root ".."}
+        thheller/shadow-cljs {:mvn/version "2.21.0"}}}
