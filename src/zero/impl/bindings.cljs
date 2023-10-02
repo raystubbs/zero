@@ -1,6 +1,6 @@
 (ns zero.impl.bindings
   (:require
-   [zero.impl.injection :refer [with-injections] :as]
+   [zero.impl.injection :refer [with-injections]]
    [cljs.core.async :refer [chan go-loop put! alts! <! go]]))
 
 (defonce !stream-states (atom {}))

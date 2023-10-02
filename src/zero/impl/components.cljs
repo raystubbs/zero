@@ -1,4 +1,4 @@
-(ns zero.impl.comp
+(ns zero.impl.components
   (:require
    [zero.impl.base :as base]
    [clojure.string :as str]
@@ -335,9 +335,10 @@
                                    (when-let [field-name (:field normalized-spec)]
                                      [field-name normalized-spec]))))
                               (into {}))
-        request-render (fn [^js/Node dom props]
+        request-render (fn [^js/Node dom props connecting?]
                          (let [^js instance-state (gobj/get dom PRIVATE-SYM)]
-                           (when-not (.-renderFrameId instance-state)
+                           (when (and (not (.-renderFrameId instance-state))
+                                      (.-connected instance-state))
                              (set! (.-renderFrameId instance-state)
                                    (js/requestAnimationFrame
                                     (fn [_]
@@ -347,7 +348,13 @@
                                              (.-shadow instance-state)
                                              (.-internals instance-state)
                                              (.-binds instance-state)
-                                             (view props)))))))))]
+                                             (view props)))
+                                      (let [shadow (.-shadow instance-state)
+                                            event-type (if connecting?  "connect" "update")]
+                                        (js/setTimeout
+                                         (fn []
+                                           (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false}))
+                                           (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false})))))))))))]
     (when-not (.-instances static-state)
       (set! (.-instances static-state) #{}))
     (when-not (.-initProps static-state)
@@ -365,7 +372,8 @@
                      ^js instance-state (gobj/get this PRIVATE-SYM)
                      current-props (.-props instance-state)]
                  (set! (.-instances static-state) (conj (.-instances static-state) this))
-                 (request-render this current-props)))
+                 (set! (.-connected instance-state) true)
+                 (request-render this current-props true)))
              :configurable true}
          :disconnectedCallback
          #js{:value
@@ -374,7 +382,9 @@
                      ^js instance-state (gobj/get this PRIVATE-SYM)
                      ^js/ShadowRoot shadow (.-shadow instance-state)
                      ^js/ElementInternals internals (.-internals instance-state)]
-                 (set! (.-instances static-state) (disj (.-instances static-state) this)) 
+                 (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false}))
+                 (set! (.-instances static-state) (disj (.-instances static-state) this))
+                 (set! (.-connected instance-state) false)
                  (let [binds (render shadow internals (.-binds instance-state) nil)]
                    (remove-binds binds)
                    (set! (.-binds instance-state) nil))))
@@ -392,7 +402,7 @@
                      (set!
                       (.-props instance-state)
                       (assoc (.-props instance-state) (:prop prop-spec) final-val))
-                     (request-render this (.-props instance-state))))))
+                     (request-render this (.-props instance-state) false)))))
              :configurable true}})
     (doseq [[field-name prop-spec] field->prop-spec]
       (js/Object.defineProperty
@@ -406,22 +416,22 @@
              (let [^js instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))] 
                (when-not (= x (get (.-props instance-state) (:prop prop-spec)))
                  (set! (.-props instance-state) (assoc (.-props instance-state) (:prop prop-spec) x))
-                 (request-render (js* "this") (.-props instance-state)))))
+                 (request-render (js* "this") (.-props instance-state) false))))
            :configurable true}))))
 
-(defn component [&{:keys [name props view]}]
+(defn component [{:keys [name props view]}]
   (let [el-name (kw->el-name name)]
     (if-let [existing (js/customElements.get el-name)]
       (patch-el-class existing props view)
       (let [new-class (js* "
 (class ZCustomElementClass extends HTMLElement {
-    static [zero.impl.comp.PRIVATE_SYM] = {}
+    static [zero.impl.components.PRIVATE_SYM] = {}
     constructor() {
         super()
-        this[zero.impl.comp.PRIVATE_SYM] = {
+        this[zero.impl.components.PRIVATE_SYM] = {
             shadow: this.attachShadow({mode: 'open'}),
             internals: this.attachInternals?.(),
-            props: ZCustomElementClass[zero.impl.comp.PRIVATE_SYM].initProps
+            props: ZCustomElementClass[zero.impl.components.PRIVATE_SYM].initProps
         }
     }
 })")]
@@ -432,9 +442,9 @@
 (defn component-name [k]
   (kw->el-name k))
 
-(when-not (js/customElements.get (kw->el-name ::render))
+(when-not (js/customElements.get (kw->el-name :z/echo))
   (js/customElements.define
-   (kw->el-name ::render)
+   (kw->el-name :z/echo)
    (js* "
 (class ZRender extends HTMLElement {
   #shadow; #vdom; #connected; #frameId; #binds
@@ -460,7 +470,7 @@
     }
     this.#frameId = requestAnimationFrame(() => {
       this.#frameId = undefined
-      this.#binds = zero.impl.comp.render(this.#shadow, undefined, this.#binds, this.#vdom)
+      this.#binds = zero.impl.components.render(this.#shadow, undefined, this.#binds, this.#vdom)
     })
   }
 
@@ -472,8 +482,8 @@
   disconnectedCallback() {
     this.#connected = false
       console.log('cleanup', this.#binds)
-      this.#binds = zero.impl.comp.render(this.#shadow, undefined, this.#binds, undefined)
-      zero.impl.comp.remove_binds(this.#binds)
+      this.#binds = zero.impl.components.render(this.#shadow, undefined, this.#binds, undefined)
+      zero.impl.components.remove_binds(this.#binds)
       this.#binds = undefined
   }
 
