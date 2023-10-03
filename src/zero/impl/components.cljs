@@ -46,7 +46,7 @@
      (-> props
          (assoc :z/sel tag)
          (assoc :id (some-> id (subs 1)))
-         (assoc :z/class (->> [(some-> classes (str/split #".")) (:z/class props)] flatten (remove str/blank?) not-empty)))
+         (assoc :z/class (->> [(some-> classes (str/split #"[.]")) (:z/class props)] flatten (remove str/blank?) not-empty)))
      body]
     (throw (ex-info "Invalid tag" {:tag tag}))))
 
@@ -99,15 +99,14 @@
     nil))
 
 (defn- patch-listeners [^js/Node dom props]
-  (when-let [listeners (:z/on props)]
-    (let [old-listeners (-> dom (gobj/get PROPS-SYM) :z/on)]
-      (doseq [[type listener] listeners]
-        (.addEventListener dom (name type) listener))
-      (doseq [[type listener] old-listeners]
-        (when (not= listener (get listeners type))
-          (.removeEventListener dom (name type) listener))))))
+  (let [old-listeners (-> dom (gobj/get PROPS-SYM) :z/on)
+        listeners (-> props :z/on)]
+    (doseq [[type listener] old-listeners]
+      (.removeEventListener dom (name type) listener))
+    (doseq [[type listener] listeners]
+      (.addEventListener dom (name type) listener))))
 
-(defonce !proto->fields-index (atom {}))
+(defonce !class->fields-index (atom {}))
 
 (defn- prop-writable? [^js obj prop]
   (if (nil? obj)
@@ -116,21 +115,23 @@
       (or (.-writable prop-def) (some? (.-set prop-def)))
       (prop-writable? (js/Object.getPrototypeOf obj) prop))))
 
-(defn- dom->fields-index [^js/Node example]
-  (let [proto (if-let [ce (-> example .-nodeName str/lower-case js/customElements.get)]
-                (.-prototype ce)
-                (js/Object.getPrototypeOf example))]
-    (if-let [existing (get @!proto->fields-index proto)]
-      existing
-      (let [props-index (->> (gobj/getAllPropertyNames proto)
-                             (filter #(prop-writable? proto %))
-                             (mapcat
-                               (fn [prop-name]
-                                 [[(keyword (base/snake-case prop-name)) prop-name]
-                                  [(keyword (base/cammel-case prop-name)) prop-name]]))
-                             (into {}))]
-        (swap! !proto->fields-index assoc proto props-index)
-        props-index))))
+(defn- class->fields-index [^js class]
+  (let [parent-class (js/Object.getPrototypeOf class)
+        proto (.-prototype class)]
+    (when proto
+      (or
+        (get @!class->fields-index class)
+        (let [index (->> proto
+                         js/Object.getOwnPropertyNames
+                         (filter #(prop-writable? proto %))
+                         (mapcat
+                           (fn [prop-name]
+                             [[(keyword (base/snake-case prop-name)) prop-name]
+                              [(keyword (base/cammel-case prop-name)) prop-name]]))
+                         (into {})
+                         (merge (some-> parent-class class->fields-index)))]
+          (swap! !class->fields-index assoc class index)
+          index)))))
 
 (defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props]
   (when (not= props (gobj/get dom PROPS-SYM))
@@ -158,7 +159,7 @@
 (defn- patch-props [^js/Node dom !binds props]
   (when (not= props (gobj/get dom PROPS-SYM))
     (patch-listeners dom props)
-    (let [fields-index (dom->fields-index dom)
+    (let [fields-index (-> dom .-constructor class->fields-index)
           set-prop (fn [dom prop-key prop-value]
                      (if-let [field-name (get fields-index prop-key)]
                        (gobj/set dom field-name prop-value)

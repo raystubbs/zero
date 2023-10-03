@@ -29,7 +29,7 @@
           (loop [[value ch] (alts! [!stream-ch !kill-ch])]
             (if (= ch !kill-ch)
               nil
-              (when value
+              (when (some? value)
                 (let [new-val (if (= value ::nil) nil value)
                       {old-val :current watches :watches} (get @!stream-states stream-ident)]
                   (swap! !stream-states assoc-in [stream-ident :current] new-val)
