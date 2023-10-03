@@ -20,20 +20,23 @@ An action is a representation of a collection of
 effects as data.  Actions can be called, and expect
 a `js/Event` as input.  Actions can be compared, hashed,
 printed, etc. as data.
-" [& effects]
-  (as-> effects $
-    (partition-all 2 $)
-    (reduce
-     (fn [agg effect]
-       (cond
-         (not= 2 (count effect))
-         (throw (ex-info "Missing payload for effect" {:effect-key (first effect)}))
-  
-         :else
-         (let [[effect-key effect-payload] effect]
-           (update agg effect-key #(conj (or % []) effect-payload)))))
-     {} $)
-    (act/Action. $)))
+" [& things]
+  (let [[props effects] (if (map? (first things))
+                          [(first things) (rest things)]
+                          [{} things])]
+    (as-> effects $
+          (partition-all 2 $)
+          (reduce
+            (fn [agg effect]
+              (cond
+                (not= 2 (count effect))
+                (throw (ex-info "Missing payload for effect" {:effect-key (first effect)}))
+
+                :else
+                (let [[effect-key effect-payload] effect]
+                  (update agg effect-key #(conj (or % []) effect-payload)))))
+            {} $)
+          (act/Action. props $))))
 
 (def effect "
 MultiFn used to define effects.

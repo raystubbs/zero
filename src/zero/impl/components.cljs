@@ -19,7 +19,7 @@
   "Given a vnode like `[tag-or-tags {...props}|...props & body]`
    yields `[tag-or-tags props body]`."
   [vnode]
-  (if (map? (nth vnode 1))
+  (if (map? (nth vnode 1 nil))
     [(nth vnode 0) (nth vnode 1) (flatten-body (nthrest vnode 2))]
     (loop [props {}
            [prop-name prop-val & other :as all] (rest vnode)]
@@ -32,7 +32,7 @@
   (normalize-vnode
    [:div
     :on-click "blah"
-    :clase :none
+    :z/class :none
     "Something else"]))
 
 (defn- extract-tag-props
@@ -46,13 +46,13 @@
      (-> props
          (assoc :z/sel tag)
          (assoc :id (some-> id (subs 1)))
-         (assoc :class (->> [(some-> classes (str/split #".")) (:class props)] flatten (remove str/blank?) not-empty)))
+         (assoc :z/class (->> [(some-> classes (str/split #".")) (:z/class props)] flatten (remove str/blank?) not-empty)))
      body]
     (throw (ex-info "Invalid tag" {:tag tag}))))
 
 (comment
   (extract-tag-props
-   [:div#my-thing.foo.bar {:class "something"} (list "body")]))
+   [:div#my-thing.foo.bar {:z/class "something"} (list "body")]))
 
 (defn- preproc-vnode
   "Simplifies the vnode, parsing out the classes and id from
@@ -109,15 +109,25 @@
 
 (defonce !proto->fields-index (atom {}))
 
+(defn- prop-writable? [^js obj prop]
+  (if (nil? obj)
+    false
+    (if-let [prop-def (js/Object.getOwnPropertyDescriptor obj prop)]
+      (or (.-writable prop-def) (some? (.-set prop-def)))
+      (prop-writable? (js/Object.getPrototypeOf obj) prop))))
+
 (defn- dom->fields-index [^js/Node example]
-  (let [proto (js/Object.getPrototypeOf example)]
+  (let [proto (if-let [ce (-> example .-nodeName str/lower-case js/customElements.get)]
+                (.-prototype ce)
+                (js/Object.getPrototypeOf example))]
     (if-let [existing (get @!proto->fields-index proto)]
       existing
       (let [props-index (->> (gobj/getAllPropertyNames proto)
+                             (filter #(prop-writable? proto %))
                              (mapcat
-                              (fn [prop-name]
-                                [[(keyword (base/snake-case prop-name)) prop-name]
-                                 [(keyword (base/cammel-case prop-name)) prop-name]]))
+                               (fn [prop-name]
+                                 [[(keyword (base/snake-case prop-name)) prop-name]
+                                  [(keyword (base/cammel-case prop-name)) prop-name]]))
                              (into {}))]
         (swap! !proto->fields-index assoc proto props-index)
         props-index))))
@@ -197,12 +207,14 @@
         (doseq [[k _] (some-> (gobj/get dom PROPS-SYM) :z/style)]
           (when (some-> props :z/style (get k) not)
             (gobj/set style-obj nil))))
+      (when-let [class (:z/class props)]
+        (set! (.-className dom) (cond->> class (sequential? class) flatten :always (str/join " "))))
       (gobj/set dom PROPS-SYM props))))
 
 (defn- kw->el-name [tag]
   (->
    (if-let [ns (namespace tag)]
-     (str ns "--" (name tag))
+     (str ns "-" (name tag))
      (name tag))
    (str/replace #"[^A-Za-z0-9._-]+" "-")
    str/lower-case))
@@ -294,7 +306,7 @@
   (let [!binds (atom (or binds {}))]
     (cond
       (and (vector? vnode) (= (first vnode) :z/root))
-      (patch-w-root dom !binds internals vnode)
+      (patch-w-root dom internals !binds vnode)
       
       (seq? vnode)
       (patch-children dom !binds vnode)
@@ -309,7 +321,7 @@
            :prop prop-name}
     :field {:field (-> prop-name name base/cammel-case)
             :prop prop-name}
-    :both (merge (normalize-prop-spec prop-name :attr)
+    :prop (merge (normalize-prop-spec prop-name :attr)
                  (normalize-prop-spec prop-name :field))
     (when (map? prop-spec)
       (assoc prop-spec :prop prop-name))))
@@ -335,7 +347,7 @@
                                    (when-let [field-name (:field normalized-spec)]
                                      [field-name normalized-spec]))))
                               (into {}))
-        request-render (fn [^js/Node dom props connecting?]
+        request-render (fn [^js/Node dom connecting?]
                          (let [^js instance-state (gobj/get dom PRIVATE-SYM)]
                            (when (and (not (.-renderFrameId instance-state))
                                       (.-connected instance-state))
@@ -348,7 +360,7 @@
                                              (.-shadow instance-state)
                                              (.-internals instance-state)
                                              (.-binds instance-state)
-                                             (view props)))
+                                             (view (.-props instance-state))))
                                       (let [shadow (.-shadow instance-state)
                                             event-type (if connecting?  "connect" "update")]
                                         (js/setTimeout
@@ -369,11 +381,10 @@
          #js{:value
              (fn []
                (let [^js/Node this (js* "this")
-                     ^js instance-state (gobj/get this PRIVATE-SYM)
-                     current-props (.-props instance-state)]
+                     ^js instance-state (gobj/get this PRIVATE-SYM)]
                  (set! (.-instances static-state) (conj (.-instances static-state) this))
                  (set! (.-connected instance-state) true)
-                 (request-render this current-props true)))
+                 (request-render this true)))
              :configurable true}
          :disconnectedCallback
          #js{:value
@@ -396,28 +407,40 @@
                (let [^js/Node this (js* "this")
                      ^js instance-state (gobj/get this PRIVATE-SYM)]
                  (when-let [prop-spec (get attr->prop-spec name)]
-                   (let [final-val (if-let [mapper (:attr-mapper prop-spec)]
-                                     (mapper new-val)
-                                     new-val)]
-                     (set!
-                      (.-props instance-state)
-                      (assoc (.-props instance-state) (:prop prop-spec) final-val))
-                     (request-render this (.-props instance-state) false)))))
+                   (cond
+                     (nil? new-val)
+                     (set! (.-props instance-state) (dissoc (.-props instance-state) (:prop prop-spec)))
+
+                     :else
+                     (let [final-val (if-let [mapper (:attr-mapper prop-spec)]
+                                       (mapper new-val)
+                                       new-val)]
+                       (set!
+                         (.-props instance-state)
+                         (assoc (.-props instance-state) (:prop prop-spec) final-val))
+                       (request-render this false))))))
              :configurable true}})
     (doseq [[field-name prop-spec] field->prop-spec]
       (js/Object.defineProperty
-       proto
-       field-name 
-       #js{:get
-           (fn []
-             (-> (js* "this") (gobj/get PRIVATE-SYM) .-props (get (:prop prop-spec))))
-           :set
-           (fn [x]
-             (let [^js instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))] 
-               (when-not (= x (get (.-props instance-state) (:prop prop-spec)))
-                 (set! (.-props instance-state) (assoc (.-props instance-state) (:prop prop-spec) x))
-                 (request-render (js* "this") (.-props instance-state) false))))
-           :configurable true}))))
+        proto
+        field-name
+        #js{:get
+            (fn []
+              (-> (js* "this") (gobj/get PRIVATE-SYM) .-props (get (:prop prop-spec))))
+            :set
+            (fn [x]
+              (let [^js instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))]
+                (when-not (= x (get (.-props instance-state) (:prop prop-spec)))
+                  (cond
+                    (js* "~{} === undefined" x)
+                    (set! (.-props instance-state) (dissoc (.-props instance-state) (:prop prop-spec)))
+
+                    :else
+                    (set! (.-props instance-state) (assoc (.-props instance-state) (:prop prop-spec) x)))
+                  (request-render (js* "this") false))))
+            :configurable true}))
+    (doseq [instance (.-instances static-state)]
+      (request-render instance false))))
 
 (defn component [{:keys [name props view]}]
   (let [el-name (kw->el-name name)]
@@ -444,8 +467,8 @@
 
 (when-not (js/customElements.get (kw->el-name :z/echo))
   (js/customElements.define
-   (kw->el-name :z/echo)
-   (js* "
+    (kw->el-name :z/echo)
+    (js* "
 (class ZRender extends HTMLElement {
   #shadow; #vdom; #connected; #frameId; #binds
 
@@ -454,7 +477,6 @@
   }
 
   set vdom(vdom) {
-    console.log('vdom', vdom)
     this.#vdom = vdom
     this.#connected && this.#requestRender()
   }
@@ -481,14 +503,12 @@
 
   disconnectedCallback() {
     this.#connected = false
-      console.log('cleanup', this.#binds)
       this.#binds = zero.impl.components.render(this.#shadow, undefined, this.#binds, undefined)
       zero.impl.components.remove_binds(this.#binds)
       this.#binds = undefined
   }
 
   adoptedCallback() {
-    console.log('adopted')
   }
 })
 ")))

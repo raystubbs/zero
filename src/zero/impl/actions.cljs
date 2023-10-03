@@ -1,13 +1,15 @@
 (ns zero.impl.actions
   (:require
    [zero.impl.injection :refer [with-injections] :as inj]
+   [goog.object :as gobj]
    [cljs.core.async :refer [go <!]]))
 
 (defonce ^js Action (js* "
 (class Action extends Function {
-  __effects__
-  constructor(effects) {
+  __props__, __effects__
+  constructor(props, effects) {
     super()
+    this.__props__ = props
     this.__effects__ = effects
     return new Proxy(this, {apply: (target, thisArg, args) => zero.impl.actions.perform_BANG_(target, args[0])})
   }
@@ -21,10 +23,13 @@
 (extend-type Action
   IAction
   (perform! [^js this ^js/Event ev]
-    (.stopPropagation ev)
-    (.preventDefault ev)
-    (let [context {:event ev}
+    (let [context {:event (gobj/clone ev)}
+          props (.-__props__ this)
           effects (.-__effects__ this)]
+      (when (:prevent-default? props)
+        (.preventDefault ev))
+      (when (:stop-propagation? props)
+        (.preventDefault ev))
       (go
         (let [w-injections (<! (with-injections effects context {:timeout 30000}))]
           (cond
@@ -43,11 +48,13 @@
   
   IEquiv
   (-equiv [^js this ^js other]
-    (and (instance? other Action) (= (.-__effects__ this) (.-__effects__ other))))
+    (and (instance? Action other)
+         (= (.-__props__ this) (.-__props__ other))
+         (= (.-__effects__ this) (.-__effects__ other))))
   
   IHash
   (-hash [^js this]
-    (hash (.-__effects__ this)))
+    (hash [(.-__effects__ this) (.-__props__ this)]))
   
   IPrintWithWriter
   (-pr-writer [^js this writer opts]
@@ -60,11 +67,3 @@
        (.-__effects__ this)))
      writer
      opts)))
-
-(defmethod effect ::dispatch-clone [_ _ {:keys [^js/Event event]}]
-  (let [Constr (.-constructor event)
-        clone (Constr. (.-type event) event)]
-    (some-> event .-target .getRootNode .-host (.dispatchEvent clone))))
-
-(defmethod effect ::dispatch [_ [constructor type opts] {:keys [^js/Event event]}]
-  (some-> event .-target .getRootNode .-host (.dispatchEvent (constructor. type opts))))

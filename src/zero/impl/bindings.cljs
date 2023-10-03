@@ -14,7 +14,7 @@
       (cond
         (= args-w-injections ::error)
         false
-        
+
         :else
         (let [!stream-ch (chan)
               !kill-ch (chan)
@@ -69,7 +69,7 @@
         (swap! !stream-states assoc-in [[stream-key args] :watches] new-watches))))
   
   IEquiv
-  (-equiv [_this other]
+  (-equiv [_this ^Binding other]
     (and
      (= stream-key (.-stream-key other))
      (= args (.-args other))
@@ -81,5 +81,5 @@
   
   IPrintWithWriter
   (-pr-writer [_this writer opts] 
-    (-pr-writer (concat (list 'bnd args) (when default [|| default]))
+    (-pr-writer (concat (list 'bnd stream-key) args (when default [|| default]))
                 writer opts)))
