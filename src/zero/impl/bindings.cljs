@@ -9,6 +9,8 @@
 (def || `||)
 
 (defn- boot-stream [[stream-key args :as stream-ident] new-watch]
+  (js/console.log "Boot Stream" stream-key args)
+  (swap! !stream-states assoc stream-ident {:watches (conj {} new-watch)})
   (go
     (let [args-w-injections (<! (with-injections args {} {:timeout 30000}))]
       (cond
@@ -19,12 +21,9 @@
         (let [!stream-ch (chan)
               !kill-ch (chan)
               kill-fn (stream stream-key #(put! !stream-ch (if (some? %) % ::nil)) args-w-injections)]
-          (swap! !stream-states assoc stream-ident
+          (swap! !stream-states update stream-ident merge
                  {:kill-ch !kill-ch
-                  :kill-fn kill-fn
-                  :stream-ch !stream-ch
-                  :watches (cond-> {} (some? new-watch) (conj new-watch))
-                  :current nil})
+                  :kill-fn kill-fn})
 
           (loop [[value ch] (alts! [!stream-ch !kill-ch])]
             (if (= ch !kill-ch)
@@ -46,7 +45,7 @@
 
 (defn- kill-stream [stream-ident]
   (let [{:keys [kill-ch kill-fn]} (get @!stream-states stream-ident)]
-    (put! kill-ch true)
+    (when kill-ch (put! kill-ch true))
     (when (fn? kill-fn) (kill-fn)))
   (swap! @!stream-states dissoc stream-ident))
 
@@ -57,10 +56,9 @@
   
   IWatchable
   (-add-watch [this key f]
-    (let [old-watches (get-in @!stream-states [[stream-key args] :watches])]
-      (if (empty? old-watches)
-        (boot-stream [stream-key args] [[this key] f])
-        (swap! !stream-states assoc-in [[stream-key args] :watches [this key]] f))))
+    (if (nil? (get @!stream-states [stream-key args]))
+      (boot-stream [stream-key args] [[this key] f])
+      (swap! !stream-states assoc-in [[stream-key args] :watches [this key]] f)))
   (-remove-watch [this key]
     (let [old-watches (get-in @!stream-states [[stream-key args] :watches])
           new-watches (dissoc old-watches [this key])]
@@ -83,3 +81,6 @@
   (-pr-writer [_this writer opts] 
     (-pr-writer (concat (list 'bnd stream-key) args (when default [|| default]))
                 writer opts)))
+
+(defn binding [stream-key args default]
+  (Binding. stream-key args default))

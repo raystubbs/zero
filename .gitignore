@@ -8,3 +8,5 @@
 .DS_Store
 node_modules
 /demo/pub/js
+*.iml
+.idea

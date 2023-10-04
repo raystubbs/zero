@@ -77,7 +77,7 @@ can also be compared, hashed, printed, etc. as data.
         [args [_ default]] (if sep-index
                              (split-at sep-index other)
                              [other nil])]
-    (bnd/Binding. stream-key (vec args) default)))
+    (bnd/binding stream-key (vec args) default)))
 
 (def stream "
 MultiFn used to define data streams.

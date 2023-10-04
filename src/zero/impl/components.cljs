@@ -15,10 +15,10 @@
     []
     body)))
 
-(defn- normalize-vnode
-  "Given a vnode like `[tag-or-tags {...props}|...props & body]`
-   yields `[tag-or-tags props body]`."
-  [vnode]
+(defn- normalize-vnode "
+Given a vnode like `[tag-or-tags {...props}|...props & body]`
+yields `[tag-or-tags props body]`.
+" [vnode]
   (if (map? (nth vnode 1 nil))
     [(nth vnode 0) (nth vnode 1) (flatten-body (nthrest vnode 2))]
     (loop [props {}
@@ -35,12 +35,12 @@
     :z/class :none
     "Something else"]))
 
-(defn- extract-tag-props
-  "Given a normalized vnode, parses the ids and classes
-   out of the tag and into the props, adding an
-   additional `:z/sel` prop containing the original
-   tag."
-  [[tag props body]]
+(defn- extract-tag-props "
+Given a normalized vnode, parses the ids and classes
+out of the tag and into the props, adding a `:z/sel`
+prop containing the original
+tag.
+" [[tag props body]]
   (if-let [[_ type id classes] (re-matches #"^([^#.]+)([#][^.]+)?([.].+)?$" (name tag))] 
     [(keyword (namespace tag) type)
      (-> props
@@ -54,12 +54,12 @@
   (extract-tag-props
    [:div#my-thing.foo.bar {:z/class "something"} (list "body")]))
 
-(defn- preproc-vnode
-  "Simplifies the vnode, parsing out the classes and id from
-   the tag, and converting compound tags (i.e `[:div :span]`)
-   into nested vnodes, and accumulating the whole body into
-   one sequence."
-  [vnode]
+(defn- preproc-vnode "
+Simplifies the vnode, parsing out the classes and id from
+the tag, and converting compound tags (i.e `[:div :span]`)
+into nested vnodes, and accumulating the whole body into
+one sequence.
+" [vnode]
   (let [[tag-or-tags props body] (normalize-vnode vnode)]
     (->
      (cond
@@ -87,11 +87,23 @@
   (preproc-vnode
    [::foo :on-click "my-thing"]))
 
+
+(defn- css [s]
+  (doto (js/CSSStyleSheet.) (.replaceSync s)))
+
 (defonce ^:private PROPS-SYM (js/Symbol "zProps"))
 (defonce ^:private MARK-SYM (js/Symbol "zMark"))
 (defonce ^:private HTML-NS "http://www.w3.org/1999/xhtml")
 (defonce ^:private SVG-NS "http://www.w3.org/2000/svg")
 (defonce ^:private PRIVATE-SYM (js/Symbol "zPrivate"))
+(def ^:private DEFAULT-CSS (css ":host { display: contents; }"))
+(def ^:private ROOT-TAGS
+  {:z/root              {:css DEFAULT-CSS}
+   :z/root:contents     {:css DEFAULT-CSS}
+   :z/root:block        {:css (css ":host { display: block; }")}
+   :z/root:inline-block {:css (css ":host { display: inline-block; }")}
+   :z/root:inline       {:css (css ":host { display: inline; }")}
+   :z/root:inline-flex  {:css (css ":host { display: inline-flex; }")}})
 
 (defn- default-ns [tag]
   (case tag
@@ -133,11 +145,15 @@
           (swap! !class->fields-index assoc class index)
           index)))))
 
-(defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props]
+(defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props tag]
   (when (not= props (gobj/get dom PROPS-SYM))
-    (when-let [css (:z/css props)]
+    (let [prop-css (:z/css props)
+          implicit-css (get-in ROOT-TAGS [tag :css])]
       (set! (.-adoptedStyleSheets dom)
-            (if (coll? css) (to-array css) #js[css])))
+            (cond
+              (nil? prop-css) #js[implicit-css]
+              (coll? prop-css) (->> prop-css (into [implicit-css]) to-array)
+              :else #js[implicit-css prop-css])))
     (patch-listeners dom props)
     ;; TODO: element internals
     (gobj/set dom PROPS-SYM props)))
@@ -299,14 +315,14 @@
       (gobj/set dom-child MARK-SYM false))))
 
 (defn- patch-w-root [^js/ShadowRoot dom ^js/ElementInternals internals !binds root-vnode]
-  (let [[_ props body] (preproc-vnode root-vnode)]
-    (patch-root-props dom internals props)
+  (let [[tag props body] (preproc-vnode root-vnode)]
+    (patch-root-props dom internals props tag)
     (patch-children dom !binds body)))
 
 (defn- render [^js/ShadowRoot dom ^js/ElementInternals internals binds vnode]
   (let [!binds (atom (or binds {}))]
     (cond
-      (and (vector? vnode) (= (first vnode) :z/root))
+      (and (vector? vnode) (contains? ROOT-TAGS (first vnode)))
       (patch-w-root dom internals !binds vnode)
       
       (seq? vnode)
@@ -457,6 +473,7 @@
             internals: this.attachInternals?.(),
             props: ZCustomElementClass[zero.impl.components.PRIVATE_SYM].initProps
         }
+        this[zero.impl.components.PRIVATE_SYM].shadow.adoptedStyleSheets = [zero.impl.components.DEFAULT_CSS]
     }
 })")]
         (patch-el-class new-class props view)
@@ -485,6 +502,7 @@
   constructor() {
     super()
     this.#shadow = this.attachShadow({mode: 'open'})
+    this.#shadow.adoptedStyleSheets = [zero.impl.components.DEFAULT_CSS]
   }
 
   #requestRender() {
