@@ -24,19 +24,13 @@ printed, etc. as data.
   (let [[props effects] (if (map? (first things))
                           [(first things) (rest things)]
                           [{} things])]
-    (as-> effects $
-          (partition-all 2 $)
-          (reduce
-            (fn [agg effect]
-              (cond
-                (not= 2 (count effect))
-                (throw (ex-info "Missing payload for effect" {:effect-key (first effect)}))
-
-                :else
-                (let [[effect-key effect-payload] effect]
-                  (update agg effect-key #(conj (or % []) effect-payload)))))
-            {} $)
-          (act/Action. props $))))
+    (->> effects
+          (partition-all 2)
+          (mapv (fn [effect]
+                  (if (not= 2 (count effect))
+                    (throw (ex-info "Missing payload for effect" {:effect-key (first effect)}))
+                    effect)))
+          (act/Action. props))))
 
 (def effect "
 MultiFn used to define effects.

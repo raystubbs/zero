@@ -28,7 +28,7 @@
           props (.-__props__ this)
           effects (.-__effects__ this)]
       (when (or (not (:skip-bubbled? props)) (= (.-currentTarget ev) (.-target ev)))
-        (when-not (:prevent-default? props)
+        (when (:prevent-default? props)
           (.preventDefault ev))
         (when (:stop-propagation? props)
           (.stopPropagation ev))
@@ -43,7 +43,7 @@
                 (when DEBUG
                   (js/console.groupCollapsed this)
                   (js/console.info "Event:" ev))
-                (doseq [[effect-key payloads] w-injections, payload payloads]
+                (doseq [[effect-key payload] w-injections]
                   (try
                     (when DEBUG
                       (js/console.info "Effect:" [effect-key payload]))
@@ -72,9 +72,6 @@
      (concat
       ['act]
       (some->> (.-__props__ this) not-empty (conj []))
-      (mapcat
-       (fn [[effect-key payloads]]
-         (mapcat #(vector effect-key %) payloads))
-       (.-__effects__ this)))
+      (mapcat identity (.-__effects__ this)))
      writer
      opts)))

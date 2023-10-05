@@ -9,7 +9,6 @@
 (def || `||)
 
 (defn- boot-stream [[stream-key args :as stream-ident] new-watch]
-  (js/console.log "Boot Stream" stream-key args)
   (swap! !stream-states assoc stream-ident {:watches (conj {} new-watch)})
   (go
     (let [args-w-injections (<! (with-injections args {} {:timeout 30000}))]

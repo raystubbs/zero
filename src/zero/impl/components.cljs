@@ -5,15 +5,13 @@
    [goog.object :as gobj]))
 
 (defn- flatten-body [body]
-  (seq
-   (reduce
-    (fn [agg nxt]
+  (mapcat
+    (fn flattener [item]
       (cond
-        (seq? nxt) (into agg nxt) 
-        (nil? nxt) agg 
-        :else (conj agg nxt)))
-    []
-    body)))
+        (seq? item) (mapcat flattener item)
+        (nil? item) nil
+        :else [item]))
+    body))
 
 (defn- normalize-vnode "
 Given a vnode like `[tag-or-tags {...props}|...props & body]`
@@ -187,18 +185,18 @@ one sequence.
             (if-let [existing (get @!binds v)]
               (do
                 (swap! !binds update-in [v :binders] conj [dom k])
-                (set-prop dom k (:current existing)))
+                (set-prop dom k @(:current existing)))
               (let [watch-uuid (random-uuid)
-                    current (if (satisfies? IDeref v) (deref v) nil)
+                    !current (atom (if (satisfies? IDeref v) (deref v) nil))
                     binders #{[dom k]}]
                 (add-watch
                  v watch-uuid
                  (fn [_ _ _ new-val]
-                   (swap! !binds assoc-in [v :current] new-val)
+                   (reset! !current new-val)
                    (doseq [[binder-dom binder-prop] (get-in @!binds [v :binders])]
                      (set-prop binder-dom binder-prop new-val))))
-                (swap! !binds assoc v {:uuid watch-uuid :current current :binders binders})
-                (set-prop dom k current)))
+                (swap! !binds assoc v {:uuid watch-uuid :current !current :binders binders})
+                (set-prop dom k @!current)))
 
             :else
             (set-prop dom k v))))
@@ -308,7 +306,7 @@ one sequence.
         (let [child-dom (take-text-dom)]
           (set! (.-nodeValue child-dom) (str vnode))
           (mark-and-inject child-dom))))
-    (doseq [dom-child (-> dom .-childNodes array-seq)]
+    (doseq [dom-child (-> dom .-childNodes js/Array.from)]
       (when-not (gobj/get dom-child MARK-SYM)
         (cleanup-dom dom-child !binds)
         (.removeChild dom dom-child))
