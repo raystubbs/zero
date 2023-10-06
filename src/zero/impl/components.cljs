@@ -221,10 +221,12 @@ one sequence.
         (doseq [[k v] (:z/style props)]
           (gobj/set style-obj (-> k name base/cammel-case) (->css-value v)))
         (doseq [[k _] (some-> (gobj/get dom PROPS-SYM) :z/style)]
-          (when (some-> props :z/style (get k) not)
-            (gobj/set style-obj nil))))
-      (when-let [class (:z/class props)]
-        (set! (.-className dom) (cond->> class (sequential? class) flatten :always (str/join " "))))
+          (when-not (contains? (:z/style props) k)
+            (.removeProperty style-obj (-> k name base/cammel-case)))))
+      (if-let [class (:z/class props)]
+        (set! (.-className dom) (cond->> class (sequential? class) flatten :always (str/join " ")))
+        (when-not (contains? props :class)
+          (set! (.-className dom) "")))
       (gobj/set dom PROPS-SYM props))))
 
 (defn- kw->el-name [tag]
@@ -248,7 +250,7 @@ one sequence.
   
             :else
             (swap! !binds assoc-in [v :binders] binders))))))
-  (doseq [child-dom (-> dom .-childNodes array-seq)]
+  (doseq [child-dom (-> dom .-childNodes js/Array.from)]
     (cleanup-dom child-dom !binds)))
 
 (defn- patch-children [^js/Node dom !binds children]
@@ -259,7 +261,7 @@ one sequence.
                           :text
                           (let [props (gobj/get child-dom PROPS-SYM)]
                             [(:z/sel props) (:z/key props)])))
-                      (-> dom .-childNodes array-seq)))
+                      (-> dom .-childNodes js/Array.from)))
         !dom-cursor (atom (.-firstChild dom))
 
         mark-and-inject (fn [^js/Node child-dom]
@@ -280,13 +282,14 @@ one sequence.
                           (do
                             (swap! !child-doms update matcher subvec 1)
                             match)
-                          (js/document.createElementNS
-                           (or
-                            (:xmlns props)
-                            (default-ns tag)
-                            (.-namespaceURI dom)
-                            HTML-NS)
-                           (kw->el-name tag)))))
+                          (do
+                            (js/document.createElementNS
+                              (or
+                                (:xmlns props)
+                                (default-ns tag)
+                                (.-namespaceURI dom)
+                                HTML-NS)
+                              (kw->el-name tag))))))
         
         take-text-dom (fn []
                         (if-let [existing (first (get @!child-doms :text))]
@@ -371,18 +374,19 @@ one sequence.
                                    (js/requestAnimationFrame
                                     (fn [_]
                                       (set! (.-renderFrameId instance-state) nil)
-                                      (set! (.-binds instance-state)
-                                            (render
-                                             (.-shadow instance-state)
-                                             (.-internals instance-state)
-                                             (.-binds instance-state)
-                                             (view (.-props instance-state))))
-                                      (let [shadow (.-shadow instance-state)
-                                            event-type (if connecting?  "connect" "update")]
-                                        (js/setTimeout
-                                         (fn []
-                                           (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false}))
-                                           (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false})))))))))))]
+                                      (when (.-connected instance-state)
+                                        (set! (.-binds instance-state)
+                                              (render
+                                                (.-shadow instance-state)
+                                                (.-internals instance-state)
+                                                (.-binds instance-state)
+                                                (view (.-props instance-state))))
+                                        (let [shadow (.-shadow instance-state)
+                                              event-type (if connecting? "connect" "update")]
+                                          (js/setTimeout
+                                            (fn []
+                                              (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false}))
+                                              (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))))]
     (when-not (.-instances static-state)
       (set! (.-instances static-state) #{}))
     (when-not (.-initProps static-state)
@@ -412,9 +416,10 @@ one sequence.
                  (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false}))
                  (set! (.-instances static-state) (disj (.-instances static-state) this))
                  (set! (.-connected instance-state) false)
-                 (let [binds (render shadow internals (.-binds instance-state) nil)]
-                   (remove-binds binds)
-                   (set! (.-binds instance-state) nil))))
+                 (remove-binds (.-binds instance-state))
+                 (set! (.-binds instance-state) nil)
+                 (doseq [child-dom (-> shadow .-childNodes array-seq)]
+                   (.remove child-dom))))
              :configurable true}
          
          :attributeChangedCallback
@@ -525,16 +530,18 @@ one sequence.
   }
 
   disconnectedCallback() {
-    ZEcho.#instances.remove(this)
+    ZEcho.#instances.delete(this)
     this.#connected = false
-    this.#binds = zero.impl.components.render(this.#shadow, undefined, this.#binds, undefined)
     zero.impl.components.remove_binds(this.#binds)
+    for(const child of this.#shadow.childNodes) {
+      child.remove()
+    }
     this.#binds = undefined
   }
 
   static handleAssetUpdates(arg) {
-    for(instance of ZEcho.#instances) {
-      zero.impl.components.handle_asset_updates_for_node(this.#shadow, arg)
+    for(const instance of ZEcho.#instances) {
+      zero.impl.components.handle_asset_updates_for_node(instance.#shadow, arg)
     }
   }
 })"
@@ -552,6 +559,7 @@ one sequence.
               (let [^js/Node clone (.cloneNode link-dom)]
                 (.. url -searchParams (set "v" (rand)))
                 (set! (.-href clone) (.-href url))
+                (gobj/set clone PROPS-SYM (gobj/get link-dom PROPS-SYM))
                 (.insertAdjacentElement link-dom "beforebegin" clone)
                 (.remove link-dom)))))))
     (when (seq img)

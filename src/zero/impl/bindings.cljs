@@ -46,7 +46,7 @@
   (let [{:keys [kill-ch kill-fn]} (get @!stream-states stream-ident)]
     (when kill-ch (put! kill-ch true))
     (when (fn? kill-fn) (kill-fn)))
-  (swap! @!stream-states dissoc stream-ident))
+  (swap! !stream-states dissoc stream-ident))
 
 (deftype Binding [stream-key args default]
   IDeref
