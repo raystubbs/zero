@@ -4,6 +4,6 @@
           {:target :browser
            :output-dir "pub/js"
            :asset-path "/js"
-           :compiler-options {:infer-externs true}
+           :compiler-options {:infer-externs true :warnings {:redef false}}
            :devtools {:watch-dir "pub/css" :watch-path "/css"}
            :modules {:main {:init-fn demo/init}}}}}

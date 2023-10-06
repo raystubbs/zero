@@ -2,7 +2,8 @@
   (:require
    [zero.impl.base :as base]
    [clojure.string :as str]
-   [goog.object :as gobj]))
+   [goog.object :as gobj]
+   [goog :refer [DEBUG]]))
 
 (defn- flatten-body [body]
   (mapcat
@@ -457,6 +458,8 @@ one sequence.
     (doseq [instance (.-instances static-state)]
       (request-render instance false))))
 
+(defonce ^:private component-classes (atom #{}))
+
 (defn component [{:keys [name props view]}]
   (let [el-name (kw->el-name name)]
     (if-let [existing (js/customElements.get el-name)]
@@ -474,6 +477,7 @@ one sequence.
         this[zero.impl.components.PRIVATE_SYM].shadow.adoptedStyleSheets = [zero.impl.components.DEFAULT_CSS]
     }
 })")]
+        (swap! component-classes conj new-class)
         (patch-el-class new-class props view)
         (js/customElements.define el-name new-class))))
   nil)
@@ -482,11 +486,12 @@ one sequence.
   (kw->el-name k))
 
 (when-not (js/customElements.get (kw->el-name :z/echo))
-  (js/customElements.define
-    (kw->el-name :z/echo)
-    (js* "
-(class ZRender extends HTMLElement {
-  #shadow; #vdom; #connected; #frameId; #binds
+  (let [z-echo-class
+        (js* "
+(class ZEcho extends HTMLElement {
+  static #instances = new Set()
+  
+  #shadow; #vdom; #connected; #frameId; #binds;
 
   get vdom() {
     return this.#vdom
@@ -514,18 +519,98 @@ one sequence.
   }
 
   connectedCallback() {
+    ZEcho.#instances.add(this)
     this.#connected = true
     this.#requestRender()
   }
 
   disconnectedCallback() {
+    ZEcho.#instances.remove(this)
     this.#connected = false
-      this.#binds = zero.impl.components.render(this.#shadow, undefined, this.#binds, undefined)
-      zero.impl.components.remove_binds(this.#binds)
-      this.#binds = undefined
+    this.#binds = zero.impl.components.render(this.#shadow, undefined, this.#binds, undefined)
+    zero.impl.components.remove_binds(this.#binds)
+    this.#binds = undefined
   }
 
-  adoptedCallback() {
+  static handleAssetUpdates(arg) {
+    for(instance of ZEcho.#instances) {
+      zero.impl.components.handle_asset_updates_for_node(this.#shadow, arg)
+    }
   }
-})
-")))
+})"
+             )]
+    (js/customElements.define (kw->el-name :z/echo) z-echo-class)))
+
+(defn- handle-asset-updates-for-node [^js/Node dom kind->paths]
+  (let [{:keys [img css]} kind->paths]
+    (when (seq css)
+      (let [link-doms (.querySelectorAll dom "link[rel=\"stylesheet\"]")]
+        (doseq [^js/Node link-dom (array-seq link-doms)]
+          (let [url (js/URL. (.-href link-dom) js/location.href)]
+            (when (and (= (.-origin url) js/location.origin)
+                       (contains? css (.-pathname url)))
+              (let [^js/Node clone (.cloneNode link-dom)]
+                (.. url -searchParams (set "v" (rand)))
+                (set! (.-href clone) (.-href url))
+                (.insertAdjacentElement link-dom "beforebegin" clone)
+                (.remove link-dom)))))))
+    (when (seq img)
+      ;; we only handle the simplest case
+      (let [img-doms (.querySelectorAll dom "img")]
+        (doseq [^js/Node img-dom (array-seq img-doms)]
+          (when-let [url (some-> img-dom .-src not-empty (js/URL. js/location.href))]
+            (when (and (= (.-origin url) js/location.origin)
+                       (contains? img (.-pathname url)))
+              (.. url -searchParams (set "v" (rand)))
+              (set! (.-src img) (.-href url)))))))))
+
+(defn- handle-asset-updates [paths]
+  (let [kind->paths
+        (->> paths
+             (group-by
+              (fn [path]
+                (cond
+                  (str/ends-with? path ".css")
+                  :css
+                  
+                  (or
+                   (str/ends-with? path ".png")
+                   (str/ends-with? path ".jpg")
+                   (str/ends-with? path ".jpeg")
+                   (str/ends-with? path ".svg")
+                   (str/ends-with? path ".webp"))
+                  :img)))
+             (map #(vector (key %) (set (val %))))
+             (into {}))]
+    (doseq [^js class @component-classes]
+      (let [^js static-state (gobj/get class PRIVATE-SYM)]
+        (doseq [instance (.-instances static-state)]
+          (handle-asset-updates-for-node (-> (gobj/get instance PRIVATE-SYM) .-shadow) kind->paths))))))
+
+;; try to tap into shadow-cljs so we can update our
+;; shadow root assets on hot reload, this is an unsanitary
+;; hack that depends on shadow-cljs internals, may break
+;; with future version of shadow-cljs!!!!  But at least
+;; it shouldn't break shadow-cljs.
+(defonce
+  _only-do-this-stuff-once
+  (when-let [shadow-add-plugin (resolve 'shadow.cljs.devtools.client.shared/add-plugin!)]
+    (shadow-add-plugin
+     ::zero #{}
+     (fn [{:keys [runtime]}]
+       (let [state-ref (:state-ref runtime)
+             orig-op-handler (get-in @state-ref [:ops :cljs-asset-update])
+             override-op-handler (fn [& args]
+                                   (js/setTimeout #(some-> args first :updates handle-asset-updates))
+                                   (apply orig-op-handler args))]
+         (when orig-op-handler
+           (swap! state-ref assoc-in [:ops :cljs-asset-update] override-op-handler))
+         
+         {:runtime runtime
+          :orig-op-handler orig-op-handler
+          :override-op-handler override-op-handler}))
+     (fn [{:keys [runtime orig-op-handler override-op-handler]}]
+       (let [state-ref (:state-ref runtime)
+             current-op-handler (get-in @state-ref [:ops :cljs-asset-update])]
+         (when (= current-op-handler override-op-handler)
+           (swap! state-ref assoc-in [:ops :cljs-asset-update] orig-op-handler)))))))
