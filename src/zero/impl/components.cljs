@@ -237,6 +237,8 @@ one sequence.
    (str/replace #"[^A-Za-z0-9._-]+" "-")
    str/lower-case))
 
+(def ^:private !css-links (atom #{}))
+
 (defn- cleanup-dom [^js/Node dom !binds]
   (doseq [[k v] (gobj/get dom PROPS-SYM)]
     (when (and v (not (namespace k)))
@@ -247,11 +249,13 @@ one sequence.
             (do
               (remove-watch v (get @!binds [v :uuid]))
               (swap! !binds dissoc v))
-  
+            
             :else
             (swap! !binds assoc-in [v :binders] binders))))))
-  (doseq [child-dom (-> dom .-childNodes js/Array.from)]
-    (cleanup-dom child-dom !binds)))
+  (doseq [child-dom (-> dom .-childNodes array-seq)]
+    (cleanup-dom child-dom !binds))
+  (when (and DEBUG (= (.-nodeName dom) "LINK"))
+    (swap! !css-links disj dom)))
 
 (defn- patch-children [^js/Node dom !binds children]
   (let [!child-doms (atom
@@ -261,7 +265,7 @@ one sequence.
                           :text
                           (let [props (gobj/get child-dom PROPS-SYM)]
                             [(:z/sel props) (:z/key props)])))
-                      (-> dom .-childNodes js/Array.from)))
+                      (-> dom .-childNodes array-seq)))
         !dom-cursor (atom (.-firstChild dom))
 
         mark-and-inject (fn [^js/Node child-dom]
@@ -304,7 +308,14 @@ one sequence.
               child-dom (take-el-dom tag props)]
           (patch-props child-dom !binds props)
           (patch-children child-dom !binds body)
-          (mark-and-inject child-dom))
+          (mark-and-inject child-dom)
+          
+          ;; keep track of <link> elements so we can make them
+          ;; react to hot reloads
+          (when (and DEBUG
+                  (= (.-nodeName child-dom) "LINK")
+                  (contains? #{"stylesheet" "preload"} (.-rel child-dom)))
+            (swap! !css-links conj child-dom)))
         
         :else
         (let [child-dom (take-text-dom)]
@@ -538,87 +549,42 @@ one sequence.
     }
     this.#binds = undefined
   }
-
-  static handleAssetUpdates(arg) {
-    for(const instance of ZEcho.#instances) {
-      zero.impl.components.handle_asset_updates_for_node(instance.#shadow, arg)
-    }
-  }
 })"
              )]
     (js/customElements.define (kw->el-name :z/echo) z-echo-class)))
 
-(defn- handle-asset-updates-for-node [^js/Node dom kind->paths]
-  (let [{:keys [img css]} kind->paths]
-    (when (seq css)
-      (let [link-doms (.querySelectorAll dom "link[rel=\"stylesheet\"]")]
-        (doseq [^js/Node link-dom (array-seq link-doms)]
-          (let [url (js/URL. (.-href link-dom) js/location.href)]
-            (when (and (= (.-origin url) js/location.origin)
-                       (contains? css (.-pathname url)))
-              (let [^js/Node clone (.cloneNode link-dom)]
-                (.. url -searchParams (set "v" (rand)))
-                (set! (.-href clone) (.-href url))
-                (gobj/set clone PROPS-SYM (gobj/get link-dom PROPS-SYM))
-                (.insertAdjacentElement link-dom "beforebegin" clone)
-                (.remove link-dom)))))))
-    (when (seq img)
-      ;; we only handle the simplest case
-      (let [img-doms (.querySelectorAll dom "img")]
-        (doseq [^js/Node img-dom (array-seq img-doms)]
-          (when-let [url (some-> img-dom .-src not-empty (js/URL. js/location.href))]
-            (when (and (= (.-origin url) js/location.origin)
-                       (contains? img (.-pathname url)))
-              (.. url -searchParams (set "v" (rand)))
-              (set! (.-src img) (.-href url)))))))))
 
-(defn- handle-asset-updates [paths]
-  (let [kind->paths
-        (->> paths
-             (group-by
-              (fn [path]
-                (cond
-                  (str/ends-with? path ".css")
-                  :css
-                  
-                  (or
-                   (str/ends-with? path ".png")
-                   (str/ends-with? path ".jpg")
-                   (str/ends-with? path ".jpeg")
-                   (str/ends-with? path ".svg")
-                   (str/ends-with? path ".webp"))
-                  :img)))
-             (map #(vector (key %) (set (val %))))
-             (into {}))]
-    (doseq [^js class @component-classes]
-      (let [^js static-state (gobj/get class PRIVATE-SYM)]
-        (doseq [instance (.-instances static-state)]
-          (handle-asset-updates-for-node (-> (gobj/get instance PRIVATE-SYM) .-shadow) kind->paths))))))
-
-;; try to tap into shadow-cljs so we can update our
-;; shadow root assets on hot reload, this is an unsanitary
-;; hack that depends on shadow-cljs internals, may break
-;; with future version of shadow-cljs!!!!  But at least
-;; it shouldn't break shadow-cljs.
-(defonce
-  _only-do-this-stuff-once
-  (when-let [shadow-add-plugin (resolve 'shadow.cljs.devtools.client.shared/add-plugin!)]
-    (shadow-add-plugin
-     ::zero #{}
-     (fn [{:keys [runtime]}]
-       (let [state-ref (:state-ref runtime)
-             orig-op-handler (get-in @state-ref [:ops :cljs-asset-update])
-             override-op-handler (fn [& args]
-                                   (js/setTimeout #(some-> args first :updates handle-asset-updates))
-                                   (apply orig-op-handler args))]
-         (when orig-op-handler
-           (swap! state-ref assoc-in [:ops :cljs-asset-update] override-op-handler))
-         
-         {:runtime runtime
-          :orig-op-handler orig-op-handler
-          :override-op-handler override-op-handler}))
-     (fn [{:keys [runtime orig-op-handler override-op-handler]}]
-       (let [state-ref (:state-ref runtime)
-             current-op-handler (get-in @state-ref [:ops :cljs-asset-update])]
-         (when (= current-op-handler override-op-handler)
-           (swap! state-ref assoc-in [:ops :cljs-asset-update] orig-op-handler)))))))
+(defonce 
+  _only-do-this-once
+  (when DEBUG
+    (letfn
+      [(update-link [^js/Node link-dom url]
+         (let [^js/Node clone (.cloneNode link-dom)]
+           (set! (.-href clone) (.-href url))
+           (gobj/set clone PROPS-SYM (gobj/get link-dom PROPS-SYM))
+           (.insertAdjacentElement link-dom "beforebegin" clone)
+           (.addEventListener clone "load"
+             (fn [_]
+               (.remove link-dom))
+             #js{:once true})
+           (swap! !css-links disj link-dom)
+           (swap! !css-links conj clone)))
+       (observer-cb [^js/Array records]
+         (let [path->links (delay
+                             (group-by
+                               (fn [^js/Node x]
+                                 (-> x .-href (js/URL. js/location.href) .-pathname))
+                               @!css-links))]
+           (doseq [^js record records, ^js/Node node (-> record .-addedNodes array-seq)
+                   :when (and (= "LINK" (.-nodeName node)) (contains? #{"stylesheet" "preload"} (.-rel node)))
+                   :let [created-link-url (js/URL. (.-href node) js/location.href)]
+                   :when (= js/location.origin (.-origin created-link-url))
+                   ^js/Node matching-link (get @path->links (.-pathname created-link-url))]
+             (update-link matching-link created-link-url))))]
+      (let [observer (js/MutationObserver. observer-cb)
+            opts #js{:childList true}]
+        (js/addEventListener "load"
+          (fn [_]
+            (.observe observer js/document.head opts)
+            (.observe observer js/document.body opts))
+          #js{:once true})))))
