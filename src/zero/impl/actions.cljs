@@ -25,7 +25,7 @@
   IAction
   (perform! [^js this ^js/Event ev]
     (let [context {:event (gobj/clone ev)}
-          props (.-__props__ this)
+          props (.-__props__ this) 
           effects (.-__effects__ this)]
       (when (or (not (:skip-bubbled? props)) (= (.-currentTarget ev) (.-target ev)))
         (when (:prevent-default? props)
@@ -33,9 +33,9 @@
         (when (:stop-propagation? props)
           (.stopPropagation ev))
         (go
-          (let [w-injections (<! (with-injections effects context {:timeout 30000}))]
+          (let [effects-w-injections (<! (with-injections effects context {:timeout 5000}))]
             (cond
-              (= ::error w-injections)
+              (= ::inj/error effects-w-injections)
               nil
 
               :else
@@ -43,7 +43,7 @@
                 (when DEBUG
                   (js/console.groupCollapsed this)
                   (js/console.info "Event:" ev))
-                (doseq [[effect-key payload] w-injections]
+                (doseq [[effect-key payload] effects-w-injections]
                   (try
                     (when DEBUG
                       (js/console.info "Effect:" [effect-key payload]))

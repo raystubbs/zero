@@ -1,6 +1,6 @@
 (ns zero.impl.bindings
   (:require
-   [zero.impl.injection :refer [with-injections]]
+   [zero.impl.injection :refer [with-injections] :as inj]
    [cljs.core.async :refer [chan go-loop put! alts! <! go]]))
 
 (defonce !stream-states (atom {}))
@@ -8,13 +8,19 @@
 
 (def || `||)
 
+(defn- kill-stream [stream-ident]
+  (let [{:keys [kill-ch kill-fn]} (get @!stream-states stream-ident)]
+    (when kill-ch (put! kill-ch true))
+    (when (fn? kill-fn) (kill-fn)))
+  (swap! !stream-states dissoc stream-ident))
+
 (defn- boot-stream [[stream-key args :as stream-ident] new-watch]
   (swap! !stream-states assoc stream-ident {:watches (conj {} new-watch)})
   (go
     (let [args-w-injections (<! (with-injections args {} {:timeout 30000}))]
       (cond
-        (= args-w-injections ::error)
-        false
+        (= args-w-injections ::inj/error)
+        (kill-stream stream-ident)
 
         :else
         (let [!stream-ch (chan)
@@ -41,12 +47,6 @@
                          e)))))
                 (recur (alts! [!stream-ch !kill-ch])))))
           true)))))
-
-(defn- kill-stream [stream-ident]
-  (let [{:keys [kill-ch kill-fn]} (get @!stream-states stream-ident)]
-    (when kill-ch (put! kill-ch true))
-    (when (fn? kill-fn) (kill-fn)))
-  (swap! !stream-states dissoc stream-ident))
 
 (deftype Binding [stream-key args default]
   IDeref
