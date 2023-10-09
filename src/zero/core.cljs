@@ -61,8 +61,11 @@ represented as data.  Bindings are IWatchable, and
 any updates in the underlying data stream will be
 reflected in the properties they're bound to.  Bindings
 can also be compared, hashed, printed, etc. as data.
-" [stream-key & other]
-  (let [sep-index (loop [cur-idx 0
+" [& things]
+  (let [[props stream-key other] (if (map? (first things))
+                                   [(first things) (second things) (nthrest things 2)]
+                                   [{} (first things) (rest things)])
+        sep-index (loop [cur-idx 0
                          [x & xs] other]
                     (cond
                       (= x bnd/||) cur-idx
@@ -71,7 +74,7 @@ can also be compared, hashed, printed, etc. as data.
         [args [_ default]] (if sep-index
                              (split-at sep-index other)
                              [other nil])]
-    (bnd/binding stream-key (vec args) default)))
+    (bnd/binding props stream-key (vec args) default)))
 
 (def stream "
 MultiFn used to define data streams.

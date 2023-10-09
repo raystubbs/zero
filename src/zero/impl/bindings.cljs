@@ -48,16 +48,21 @@
                 (recur (alts! [!stream-ch !kill-ch])))))
           true)))))
 
-(deftype Binding [stream-key args default]
+(deftype Binding [props stream-key args default]
   IDeref
   (-deref [_this]
-    (get-in @!stream-states [[stream-key args] :current] default))
+    (let [v (get-in @!stream-states [[stream-key args] :current] default)]
+      (if (and (:default-nil? props) (nil? v)) default v)))
   
   IWatchable
   (-add-watch [this key f]
-    (if (nil? (get @!stream-states [stream-key args]))
-      (boot-stream [stream-key args] [[this key] f])
-      (swap! !stream-states assoc-in [[stream-key args] :watches [this key]] f)))
+    (let [actual-fun (if (:default-nil? props)
+                      (fn [ref key old-val new-val]
+                        (f ref key old-val (if (nil? new-val) default new-val)))
+                      f)]
+      (if (nil? (get @!stream-states [stream-key args]))
+        (boot-stream [stream-key args] [[this key] actual-fun])
+        (swap! !stream-states assoc-in [[stream-key args] :watches [this key]] actual-fun))))
   (-remove-watch [this key]
     (let [old-watches (get-in @!stream-states [[stream-key args] :watches])
           new-watches (dissoc old-watches [this key])]
@@ -70,16 +75,17 @@
     (and
      (= stream-key (.-stream-key other))
      (= args (.-args other))
-     (= default (.-default other))))
+     (= default (.-default other))
+     (= props (.-props other))))
   
   IHash
   (-hash [_this]
-    (hash [stream-key args default]))
+    (hash [props stream-key args default]))
   
   IPrintWithWriter
   (-pr-writer [_this writer opts] 
-    (-pr-writer (concat (list 'bnd stream-key) args (when default [|| default]))
+    (-pr-writer (concat (list 'bnd) (when props [props]) [stream-key] args (when default [|| default]))
                 writer opts)))
 
-(defn binding [stream-key args default]
-  (Binding. stream-key args default))
+(defn binding [props stream-key args default]
+  (Binding. props stream-key args default))

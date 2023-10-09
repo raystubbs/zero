@@ -171,14 +171,20 @@ one sequence.
     :else
     (str x)))
 
+(defonce ^:private !css-links (atom #{}))
+(defonce ^:private !css-href-overrides (atom {}))
+
 (defn- patch-props [^js/Node dom !binds props]
   (when (not= props (gobj/get dom PROPS-SYM))
     (patch-listeners dom props)
     (let [fields-index (-> dom .-constructor class->fields-index)
           set-prop (fn [dom prop-key prop-value]
-                     (if-let [field-name (get fields-index prop-key)]
-                       (gobj/set dom field-name prop-value)
-                       (.setAttribute dom (name prop-key) (if (true? prop-value) "" (str prop-value)))))]
+                     (let [adjusted-value (if (and DEBUG (= (.-nodeName dom) "LINK") (= prop-key :href))
+                                            (get @!css-href-overrides prop-value prop-value)
+                                            prop-value)]
+                       (if-let [field-name (get fields-index prop-key)]
+                         (gobj/set dom field-name adjusted-value)
+                         (.setAttribute dom (name prop-key) (if (true? adjusted-value) "" (str adjusted-value))))))]
       (doseq [[k v] props]
         (when (and v (not (namespace k)))
           (cond
@@ -236,8 +242,6 @@ one sequence.
      (name tag))
    (str/replace #"[^A-Za-z0-9._-]+" "-")
    str/lower-case))
-
-(def ^:private !css-links (atom #{}))
 
 (defn- cleanup-dom [^js/Node dom !binds]
   (doseq [[k v] (gobj/get dom PROPS-SYM)]
@@ -560,7 +564,7 @@ one sequence.
     (letfn
       [(update-link [^js/Node link-dom url]
          (let [^js/Node clone (.cloneNode link-dom)]
-           (set! (.-href clone) (.-href url))
+           (set! (.-href clone) url)
            (gobj/set clone PROPS-SYM (gobj/get link-dom PROPS-SYM))
            (.insertAdjacentElement link-dom "beforebegin" clone)
            (.addEventListener clone "load"
@@ -577,10 +581,12 @@ one sequence.
                                @!css-links))]
            (doseq [^js record records, ^js/Node node (-> record .-addedNodes array-seq)
                    :when (and (= "LINK" (.-nodeName node)) (contains? #{"stylesheet" "preload"} (.-rel node)))
-                   :let [created-link-url (js/URL. (.-href node) js/location.href)]
+                   :let [created-link-url (js/URL. (.-href node) js/location.href)
+                         href (.getAttribute node "href")]
                    :when (= js/location.origin (.-origin created-link-url))
                    ^js/Node matching-link (get @path->links (.-pathname created-link-url))]
-             (update-link matching-link created-link-url))))]
+             (swap! !css-href-overrides assoc (-> matching-link (gobj/get PROPS-SYM) :href) href)
+             (update-link matching-link href))))]
       (let [observer (js/MutationObserver. observer-cb)
             opts #js{:childList true}]
         (js/addEventListener "load"
