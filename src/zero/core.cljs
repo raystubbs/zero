@@ -159,7 +159,7 @@ done with an `attr-mapper` function like so:
 ```clojure
 :props {:foo {:attr \"foo\" :field \"foo\" :attr-mapper js/parseInt}}
 ```
-" [&{:keys [name props view] :as things}]
+" [&{:keys [name props view focus] :as things}]
   (c/component things))
 
 (defn component-name "

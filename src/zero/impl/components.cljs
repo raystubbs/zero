@@ -174,6 +174,7 @@ one sequence.
 (defonce ^:private !css-links (atom #{}))
 (defonce ^:private !css-href-overrides (atom {}))
 
+;; TODO: use clojure.data/diff to only patch changed things
 (defn- patch-props [^js/Node dom !binds props]
   (when (not= props (gobj/get dom PROPS-SYM))
     (patch-listeners dom props)
@@ -225,14 +226,15 @@ one sequence.
               (.removeAttribute dom k)))))
       (let [style-obj (.-style dom)]
         (doseq [[k v] (:z/style props)]
-          (gobj/set style-obj (-> k name base/cammel-case) (->css-value v)))
-        (doseq [[k _] (some-> (gobj/get dom PROPS-SYM) :z/style)]
+          (if-not v
+            (.removeProperty style-obj (name k))
+            (.setProperty style-obj (name k) (->css-value v))))
+        (doseq [[k _] (:z/style (gobj/get dom PROPS-SYM))]
           (when-not (contains? (:z/style props) k)
-            (.removeProperty style-obj (-> k name base/cammel-case)))))
+            (.removeProperty style-obj (name k)))))
       (if-let [class (:z/class props)]
-        (set! (.-className dom) (cond->> class (sequential? class) flatten :always (str/join " ")))
-        (when-not (contains? props :class)
-          (set! (.-className dom) "")))
+        (.setAttribute dom "class" (cond->> class (sequential? class) flatten :always (str/join " ")))
+        (.removeAttribute dom "class"))
       (gobj/set dom PROPS-SYM props))))
 
 (defn- kw->el-name [tag]
@@ -336,18 +338,16 @@ one sequence.
     (patch-root-props dom internals props tag)
     (patch-children dom !binds body)))
 
-(defn- render [^js/ShadowRoot dom ^js/ElementInternals internals binds vnode]
-  (let [!binds (atom (or binds {}))]
-    (cond
-      (and (vector? vnode) (contains? ROOT-TAGS (first vnode)))
-      (patch-w-root dom internals !binds vnode)
-      
-      (seq? vnode)
-      (patch-children dom !binds vnode)
-      
-      :else
-      (patch-children dom !binds (list vnode)))
-    @!binds))
+(defn- render [^js/ShadowRoot dom ^js/ElementInternals internals !binds vnode]
+  (cond
+    (and (vector? vnode) (contains? ROOT-TAGS (first vnode)))
+    (patch-w-root dom internals !binds vnode)
+
+    (seq? vnode)
+    (patch-children dom !binds vnode)
+
+    :else
+    (patch-children dom !binds (list vnode))))
 
 (defn- normalize-prop-spec [prop-name prop-spec]
   (case prop-spec
@@ -390,12 +390,11 @@ one sequence.
                                     (fn [_]
                                       (set! (.-renderFrameId instance-state) nil)
                                       (when (.-connected instance-state)
-                                        (set! (.-binds instance-state)
-                                              (render
-                                                (.-shadow instance-state)
-                                                (.-internals instance-state)
-                                                (.-binds instance-state)
-                                                (view (.-props instance-state))))
+                                        (render
+                                          (.-shadow instance-state)
+                                          (.-internals instance-state)
+                                          (.-binds instance-state)
+                                          (view (.-props instance-state)))
                                         (let [shadow (.-shadow instance-state)
                                               event-type (if connecting? "connect" "update")]
                                           (js/setTimeout
@@ -406,6 +405,7 @@ one sequence.
       (set! (.-instances static-state) #{}))
     (when-not (.-initProps static-state)
       (set! (.-initProps static-state) {}))
+    (swap! !class->fields-index dissoc class)
     (js/Object.defineProperty
      class "observedAttributes"
      #js{:value (to-array (keys attr->prop-spec))
@@ -419,6 +419,7 @@ one sequence.
                      ^js instance-state (gobj/get this PRIVATE-SYM)]
                  (set! (.-instances static-state) (conj (.-instances static-state) this))
                  (set! (.-connected instance-state) true)
+                 (set! (.-binds instance-state) (atom {}))
                  (request-render this true)))
              :configurable true}
          :disconnectedCallback
@@ -426,12 +427,11 @@ one sequence.
              (fn []
                (let [^js/Node this (js* "this")
                      ^js instance-state (gobj/get this PRIVATE-SYM)
-                     ^js/ShadowRoot shadow (.-shadow instance-state)
-                     ^js/ElementInternals internals (.-internals instance-state)]
+                     ^js/ShadowRoot shadow (.-shadow instance-state)]
                  (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false}))
                  (set! (.-instances static-state) (disj (.-instances static-state) this))
                  (set! (.-connected instance-state) false)
-                 (remove-binds (.-binds instance-state))
+                 (remove-binds @(.-binds instance-state))
                  (set! (.-binds instance-state) nil)
                  (doseq [child-dom (-> shadow .-childNodes array-seq)]
                    (.remove child-dom))))
@@ -476,11 +476,15 @@ one sequence.
                   (request-render (js* "this") false))))
             :configurable true}))
     (doseq [instance (.-instances static-state)]
-      (request-render instance false))))
+      (let [^js instance-state (gobj/get instance PRIVATE-SYM)]
+        (when-let [frame-id (.-renderFrameId instance-state)]
+          (js/cancelAnimationFrame frame-id)
+          (set! (.-renderFrameId instance-state) nil))
+        (request-render instance false)))))
 
 (defonce ^:private component-classes (atom #{}))
 
-(defn component [{:keys [name props view]}]
+(defn component [{:keys [name props view focus]}]
   (let [el-name (kw->el-name name)]
     (if-let [existing (js/customElements.get el-name)]
       (patch-el-class existing props view)
@@ -490,13 +494,13 @@ one sequence.
     constructor() {
         super()
         this[zero.impl.components.PRIVATE_SYM] = {
-            shadow: this.attachShadow({mode: 'open'}),
+            shadow: this.attachShadow({mode: 'open', delegatesFocus: ~{}}),
             internals: this.attachInternals?.(),
             props: ZCustomElementClass[zero.impl.components.PRIVATE_SYM].initProps
         }
         this[zero.impl.components.PRIVATE_SYM].shadow.adoptedStyleSheets = [zero.impl.components.DEFAULT_CSS]
     }
-})")]
+})" (= focus :delegate))]
         (swap! component-classes conj new-class)
         (patch-el-class new-class props view)
         (js/customElements.define el-name new-class))))
@@ -534,20 +538,21 @@ one sequence.
     }
     this.#frameId = requestAnimationFrame(() => {
       this.#frameId = undefined
-      this.#binds = zero.impl.components.render(this.#shadow, undefined, this.#binds, this.#vdom)
+      zero.impl.components.render(this.#shadow, undefined, this.#binds, this.#vdom)
     })
   }
 
   connectedCallback() {
     ZEcho.#instances.add(this)
     this.#connected = true
+    this.#binds = cljs.core.atom(cljs.core.array_map())
     this.#requestRender()
   }
 
   disconnectedCallback() {
     ZEcho.#instances.delete(this)
     this.#connected = false
-    zero.impl.components.remove_binds(this.#binds)
+    zero.impl.components.remove_binds(cljs.core.deref(this.#binds))
     for(const child of this.#shadow.childNodes) {
       child.remove()
     }

@@ -73,10 +73,11 @@
   IEquiv
   (-equiv [_this ^Binding other]
     (and
-     (= stream-key (.-stream-key other))
-     (= args (.-args other))
-     (= default (.-default other))
-     (= props (.-props other))))
+      (instance? Binding other)
+      (= stream-key (.-stream-key other))
+      (= args (.-args other))
+      (= default (.-default other))
+      (= props (.-props other))))
   
   IHash
   (-hash [_this]
