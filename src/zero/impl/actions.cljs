@@ -6,13 +6,13 @@
    [cljs.core.async :refer [go <!]]))
 
 (defonce ^js Action (js* "
-(class Action extends Function {
-  __props__; __effects__
+(class extends Function {
+  __props__; __effects__;
   constructor(props, effects) {
-    super()
-    this.__props__ = props
-    this.__effects__ = effects
-    return new Proxy(this, {apply: (target, thisArg, args) => zero.impl.actions.perform_BANG_(target, args[0])})
+    super();
+    this.__props__ = props;
+    this.__effects__ = effects;
+    return new Proxy(this, {apply: (target, thisArg, args) => zero.impl.actions.perform_BANG_(target, args[0])});
   }
 })"))
 

@@ -389,13 +389,10 @@ one sequence.
     (when (map? prop-spec)
       (assoc prop-spec :prop prop-name))))
 
-(defn- remove-binds [binds]
-  (doseq [[w {:keys [uuid]}] binds]
-    (remove-watch w uuid)))
-
-(defn- patch-el-class [class props view]
+(defn- patch-el-class [class props view focus]
   (let [^js proto (.-prototype class)
         ^js static-state (gobj/get class PRIVATE-SYM)
+        version (or (some-> static-state .-version inc) 0)
         attr->prop-spec (->> props
                              (keep
                               (fn [[prop-name prop-spec]]
@@ -419,6 +416,8 @@ one sequence.
                                     (fn [_]
                                       (set! (.-renderFrameId instance-state) nil)
                                       (when (.-connected instance-state)
+                                        (when (and focus (< (.-tabIndex dom) 0))
+                                          (set! (.-tabIndex dom) 0))
                                         (render
                                           (.-shadow instance-state)
                                           (.-internals instance-state)
@@ -430,10 +429,7 @@ one sequence.
                                             (fn []
                                               (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false}))
                                               (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))))]
-    (when-not (.-instances static-state)
-      (set! (.-instances static-state) #{}))
-    (when-not (.-initProps static-state)
-      (set! (.-initProps static-state) {}))
+    (set! (.-version static-state) version)
     (swap! !class->fields-index dissoc class)
     (js/Object.defineProperty
      class "observedAttributes"
@@ -460,10 +456,10 @@ one sequence.
                  (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false}))
                  (set! (.-instances static-state) (disj (.-instances static-state) this))
                  (set! (.-connected instance-state) false)
-                 (remove-binds @(.-binds instance-state))
-                 (set! (.-binds instance-state) nil)
-                 (doseq [child-dom (-> shadow .-childNodes array-seq)]
-                   (.remove child-dom))))
+                 (doseq [^js/Node child-dom (-> shadow .-childNodes array-seq)]
+                   (cleanup-dom child-dom (.-binds instance-state))
+                   (.remove child-dom))
+                 (assert (= {} (.-binds instance-state)))))
              :configurable true}
          
          :attributeChangedCallback
@@ -516,22 +512,22 @@ one sequence.
 (defn component [{:keys [name props view focus]}]
   (let [el-name (kw->el-name name)]
     (if-let [existing (js/customElements.get el-name)]
-      (patch-el-class existing props view)
+      (patch-el-class existing props view focus)
       (let [new-class (js* "
-(class ZCustomElementClass extends HTMLElement {
-    static [zero.impl.components.PRIVATE_SYM] = {}
+(class extends HTMLElement {
     constructor() {
-        super()
+        super();
         this[zero.impl.components.PRIVATE_SYM] = {
             shadow: this.attachShadow({mode: 'open', delegatesFocus: ~{}}),
             internals: this.attachInternals?.(),
-            props: ZCustomElementClass[zero.impl.components.PRIVATE_SYM].initProps
-        }
-        this[zero.impl.components.PRIVATE_SYM].shadow.adoptedStyleSheets = [zero.impl.components.DEFAULT_CSS]
+            props: cljs.core.array_map()
+        };
+        this[zero.impl.components.PRIVATE_SYM].shadow.adoptedStyleSheets = [zero.impl.components.DEFAULT_CSS];
     }
 })" (= focus :delegate))]
+        (gobj/set new-class PRIVATE-SYM #js{:instances #{}})
         (swap! component-classes conj new-class)
-        (patch-el-class new-class props view)
+        (patch-el-class new-class props view focus)
         (js/customElements.define el-name new-class))))
   nil)
 
@@ -539,56 +535,58 @@ one sequence.
   (kw->el-name k))
 
 (when-not (js/customElements.get (kw->el-name :z/echo))
-  (let [z-echo-class
-        (js* "
-(class ZEcho extends HTMLElement {
-  static #instances = new Set()
-  
-  #shadow; #vdom; #connected; #frameId; #binds;
-
-  get vdom() {
-    return this.#vdom
-  }
-
-  set vdom(vdom) {
-    this.#vdom = vdom
-    this.#connected && this.#requestRender()
-  }
-  
-  constructor() {
-    super()
-    this.#shadow = this.attachShadow({mode: 'open'})
-    this.#shadow.adoptedStyleSheets = [zero.impl.components.DEFAULT_CSS]
-  }
-
-  #requestRender() {
-    if(this.#frameId || !this.#connected) {
-      return
+  (let [z-echo-class (js* "
+(class extends HTMLElement {
+    constructor() {
+        super();
+        this[zero.impl.components.PRIVATE_SYM] = {
+            shadow: this.attachShadow({mode: 'open'}),
+            vdom: null
+        };
+        this[zero.impl.components.PRIVATE_SYM].shadow.adoptedStyleSheets = [zero.impl.components.DEFAULT_CSS];
     }
-    this.#frameId = requestAnimationFrame(() => {
-      this.#frameId = undefined
-      zero.impl.components.render(this.#shadow, undefined, this.#binds, this.#vdom)
-    })
-  }
+})")
+        request-render (fn [^js/Node dom]
+                         (let [^js instance-state (gobj/get dom PRIVATE-SYM)]
+                           (when (and (not (.-frameId instance-state)) (.-connected instance-state))
+                             (set! (.-frameId instance-state)
+                                   (js/requestAnimationFrame
+                                     (fn []
+                                       (set! (.-frameId instance-state) nil)
+                                       (render (.-shadow instance-state) nil (.-binds instance-state) (.-vdom dom))))))))]
 
-  connectedCallback() {
-    ZEcho.#instances.add(this)
-    this.#connected = true
-    this.#binds = cljs.core.atom(cljs.core.array_map())
-    this.#requestRender()
-  }
-
-  disconnectedCallback() {
-    ZEcho.#instances.delete(this)
-    this.#connected = false
-    zero.impl.components.remove_binds(cljs.core.deref(this.#binds))
-    for(const child of this.#shadow.childNodes) {
-      child.remove()
-    }
-    this.#binds = undefined
-  }
-})"
-             )]
+    (js/Object.defineProperties
+      (.-prototype z-echo-class)
+      #js{:connectedCallback
+          #js{:value
+              (fn []
+                (let [this (js* "this")
+                      ^js instance-state (gobj/get this PRIVATE-SYM)]
+                  (set! (.-connected instance-state) true)
+                  (set! (.-binds instance-state) (atom {}))
+                  (request-render this)))}
+          :disconnectedCallback
+          #js{:value
+              (fn []
+                (let [this (js* "this")
+                      ^js instance-state (gobj/get this PRIVATE-SYM)]
+                  (set! (.-connected instance-state) false)
+                  (doseq [^js/Node child-dom (-> instance-state .-shadow .-childNodes array-seq)]
+                    (cleanup-dom child-dom (.-binds instance-state))
+                    (.remove child-dom))
+                  (assert (= {} (.-binds instance-state)))))}
+          :vdom
+          #js{:get
+              (fn []
+                (let [this (js* "this")
+                      ^js instance-state (gobj/get this PRIVATE-SYM)]
+                  (.-vdom instance-state)))
+              :set
+              (fn [x]
+                (let [this (js* "this")
+                      ^js instance-state (gobj/get this PRIVATE-SYM)]
+                  (set! (.-vdom instance-state) x)
+                  (request-render this)))}})
     (js/customElements.define (kw->el-name :z/echo) z-echo-class)))
 
 
