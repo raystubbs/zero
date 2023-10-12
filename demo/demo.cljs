@@ -38,7 +38,7 @@
   :props {:items :prop}
   :view (fn [{:keys [items]}]
           [:z/root:block
-           [:link :rel "stylesheet" :href "/css/main.css"]
+           :z/css "/css/main.css"
            [:style ":host { height: 100vh; width: 100vw; }"]
            [:div.flex.flex-col.items-center.justify-center
             [:h1 "Todos"]

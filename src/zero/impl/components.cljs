@@ -144,6 +144,41 @@ one sequence.
           (swap! !class->fields-index assoc class index)
           index)))))
 
+(defonce ^:private !css-links (atom #{}))
+(defonce ^:private !css-stylesheet-objects (atom {}))
+(defonce ^:private !css-href-overrides (atom {}))
+
+(defn- load-stylesheet [stylesheet-object url]
+  (gobj/set stylesheet-object PRIVATE-SYM {:href (.toString url)})
+  (-> (js/fetch url)
+    (.then #(.text %))
+    (.then (fn [css-text]
+             (let [{:keys [href]} (gobj/get stylesheet-object PRIVATE-SYM)]
+               (when (= href (.toString url))
+                 (.replace stylesheet-object css-text)))))))
+
+(defn- ->stylesheet-object [x]
+  (cond
+    (instance? js/CSSStyleSheet x)
+    x
+
+    (or (string? x) (instance? js/URL x))
+    (let [absolute-url (js/URL. x js/location.href)
+          absolute-url-str (.toString absolute-url)]
+      (or
+        (get @!css-stylesheet-objects absolute-url-str)
+
+        (let [actual-url-str (if (= js/location.origin (.-origin absolute-url))
+                               (get @!css-href-overrides (.-pathname absolute-url) absolute-url-str)
+                               absolute-url-str)
+              new-css-obj (js/CSSStyleSheet.)]
+          (load-stylesheet new-css-obj actual-url-str)
+          (swap! !css-stylesheet-objects assoc absolute-url-str new-css-obj)
+          new-css-obj)))
+
+    :else
+    (throw (ex-info "can't convert given object to CSSStyleSheet" {:given x}))))
+
 (defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props tag]
   (when (not= props (gobj/get dom PROPS-SYM))
     (let [prop-css (:z/css props)
@@ -151,8 +186,8 @@ one sequence.
       (set! (.-adoptedStyleSheets dom)
             (cond
               (nil? prop-css) #js[implicit-css]
-              (coll? prop-css) (->> prop-css (into [implicit-css]) to-array)
-              :else #js[implicit-css prop-css])))
+              (coll? prop-css) (->> prop-css (map ->stylesheet-object) (into [implicit-css]) to-array)
+              :else #js[implicit-css (->stylesheet-object prop-css)])))
     (patch-listeners dom props)
     ;; TODO: element internals
     (gobj/set dom PROPS-SYM props)))
@@ -170,9 +205,6 @@ one sequence.
     
     :else
     (str x)))
-
-(defonce ^:private !css-links (atom #{}))
-(defonce ^:private !css-href-overrides (atom {}))
 
 ;; TODO: use clojure.data/diff to only patch changed things
 (defn- patch-props [^js/Node dom !binds props]
@@ -333,15 +365,12 @@ one sequence.
         (.removeChild dom dom-child))
       (gobj/set dom-child MARK-SYM false))))
 
-(defn- patch-w-root [^js/ShadowRoot dom ^js/ElementInternals internals !binds root-vnode]
-  (let [[tag props body] (preproc-vnode root-vnode)]
-    (patch-root-props dom internals props tag)
-    (patch-children dom !binds body)))
-
 (defn- render [^js/ShadowRoot dom ^js/ElementInternals internals !binds vnode]
   (cond
     (and (vector? vnode) (contains? ROOT-TAGS (first vnode)))
-    (patch-w-root dom internals !binds vnode)
+    (let [[tag props body] (preproc-vnode vnode)]
+      (patch-root-props dom internals props tag)
+      (patch-children dom !binds body))
 
     (seq? vnode)
     (patch-children dom !binds vnode)
@@ -588,10 +617,16 @@ one sequence.
                    :when (and (= "LINK" (.-nodeName node)) (contains? #{"stylesheet" "preload"} (.-rel node)))
                    :let [created-link-url (js/URL. (.-href node) js/location.href)
                          href (.getAttribute node "href")]
-                   :when (= js/location.origin (.-origin created-link-url))
-                   ^js/Node matching-link (get @path->links (.-pathname created-link-url))]
-             (swap! !css-href-overrides assoc (-> matching-link (gobj/get PROPS-SYM) :href) href)
-             (update-link matching-link href))))]
+                   :when (= js/location.origin (.-origin created-link-url))]
+             (doseq [^js/Node matching-link (get @path->links (.-pathname created-link-url))]
+               (swap! !css-href-overrides assoc (-> matching-link (gobj/get PROPS-SYM) :href) href)
+               (update-link matching-link href))
+             (doseq [[original-url-str stylesheet-object] @!css-stylesheet-objects
+                     :let [original-url (js/URL. original-url-str)]
+                     :when (and
+                             (= js/location.origin (.-origin original-url))
+                             (= (.-pathname original-url) (.-pathname created-link-url)))]
+               (load-stylesheet stylesheet-object href)))))]
       (let [observer (js/MutationObserver. observer-cb)
             opts #js{:childList true}]
         (js/addEventListener "load"
