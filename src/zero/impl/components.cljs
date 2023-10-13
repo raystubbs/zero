@@ -459,7 +459,7 @@ one sequence.
                  (doseq [^js/Node child-dom (-> shadow .-childNodes array-seq)]
                    (cleanup-dom child-dom (.-binds instance-state))
                    (.remove child-dom))
-                 (assert (= {} (.-binds instance-state)))))
+                 (assert (= {} @(.-binds instance-state)))))
              :configurable true}
          
          :attributeChangedCallback
@@ -574,7 +574,7 @@ one sequence.
                   (doseq [^js/Node child-dom (-> instance-state .-shadow .-childNodes array-seq)]
                     (cleanup-dom child-dom (.-binds instance-state))
                     (.remove child-dom))
-                  (assert (= {} (.-binds instance-state)))))}
+                  (assert (= {} @(.-binds instance-state)))))}
           :vdom
           #js{:get
               (fn []
