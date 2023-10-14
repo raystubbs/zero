@@ -177,7 +177,7 @@ one sequence.
           new-css-obj)))
 
     :else
-    (throw (ex-info "can't convert given object to CSSStyleSheet" {:given x}))))
+    (throw (ex-info "Can't convert given object to CSSStyleSheet" {:given x}))))
 
 (defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props tag]
   (when (not= props (gobj/get dom PROPS-SYM))
@@ -381,54 +381,60 @@ one sequence.
 (defn- normalize-prop-spec [prop-name prop-spec]
   (case prop-spec
     :attr {:attr (-> prop-name name base/snake-case)
+           :field (-> prop-name name base/cammel-case)
            :prop prop-name}
     :field {:field (-> prop-name name base/cammel-case)
             :prop prop-name}
-    :prop (merge (normalize-prop-spec prop-name :attr)
-                 (normalize-prop-spec prop-name :field))
     (when (map? prop-spec)
-      (assoc prop-spec :prop prop-name))))
+      (cond-> prop-spec
+        :always (assoc :prop prop-name)
+        (not (:field prop-spec)) (assoc :field (-> prop-name name base/cammel-case))))))
 
-(defn- patch-el-class [class props view focus]
+(defn- patch-el-class [class {:keys [props view focus name]}]
   (let [^js proto (.-prototype class)
         ^js static-state (gobj/get class PRIVATE-SYM)
         version (or (some-> static-state .-version inc) 0)
-        attr->prop-spec (->> props
-                             (keep
-                              (fn [[prop-name prop-spec]]
-                                (let [normalized-spec (normalize-prop-spec prop-name prop-spec)]
-                                  (when-let [attr-name (:attr normalized-spec)]
-                                    [attr-name normalized-spec]))))
-                             (into {}))
-        field->prop-spec (->> props
-                              (keep
-                               (fn [[prop-name prop-spec]]
-                                 (let [normalized-spec (normalize-prop-spec prop-name prop-spec)]
-                                   (when-let [field-name (:field normalized-spec)]
-                                     [field-name normalized-spec]))))
-                              (into {}))
+        props-map (cond
+                    (set? props) (->> props (map #(vector % :field)) (into {}))
+                    (map? props) props
+                    (nil? props) {}
+                    :else (throw (ex-info "Props must be either a map or a set" {:props props :component name})))
+        attr->prop-spec (->> props-map
+                          (keep
+                            (fn [[prop-name prop-spec]]
+                              (let [normalized-spec (normalize-prop-spec prop-name prop-spec)]
+                                (when-let [attr-name (:attr normalized-spec)]
+                                  [attr-name normalized-spec]))))
+                          (into {}))
+        field->prop-spec (->> props-map
+                           (keep
+                             (fn [[prop-name prop-spec]]
+                               (let [normalized-spec (normalize-prop-spec prop-name prop-spec)]
+                                 (when-let [field-name (:field normalized-spec)]
+                                   [field-name normalized-spec]))))
+                           (into {}))
         request-render (fn [^js/Node dom connecting?]
                          (let [^js instance-state (gobj/get dom PRIVATE-SYM)]
                            (when (and (not (.-renderFrameId instance-state))
-                                      (.-connected instance-state))
+                                   (.-connected instance-state))
                              (set! (.-renderFrameId instance-state)
-                                   (js/requestAnimationFrame
-                                    (fn [_]
-                                      (set! (.-renderFrameId instance-state) nil)
-                                      (when (.-connected instance-state)
-                                        (when (and focus (< (.-tabIndex dom) 0))
-                                          (set! (.-tabIndex dom) 0))
-                                        (render
-                                          (.-shadow instance-state)
-                                          (.-internals instance-state)
-                                          (.-binds instance-state)
-                                          (view (.-props instance-state)))
-                                        (let [shadow (.-shadow instance-state)
-                                              event-type (if connecting? "connect" "update")]
-                                          (js/setTimeout
-                                            (fn []
-                                              (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false}))
-                                              (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))))]
+                               (js/requestAnimationFrame
+                                 (fn [_]
+                                   (set! (.-renderFrameId instance-state) nil)
+                                   (when (.-connected instance-state)
+                                     (when (and focus (< (.-tabIndex dom) 0))
+                                       (set! (.-tabIndex dom) 0))
+                                     (render
+                                       (.-shadow instance-state)
+                                       (.-internals instance-state)
+                                       (.-binds instance-state)
+                                       (view (.-props instance-state)))
+                                     (let [shadow (.-shadow instance-state)
+                                           event-type (if connecting? "connect" "update")]
+                                       (js/setTimeout
+                                         (fn []
+                                           (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false}))
+                                           (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))))]
     (set! (.-version static-state) version)
     (swap! !class->fields-index dissoc class)
     (js/Object.defineProperty
@@ -490,15 +496,14 @@ one sequence.
               (-> (js* "this") (gobj/get PRIVATE-SYM) .-props (get (:prop prop-spec))))
             :set
             (fn [x]
-              (let [^js instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))]
-                (when-not (= x (get (.-props instance-state) (:prop prop-spec)))
-                  (cond
-                    (js* "~{} === undefined" x)
-                    (set! (.-props instance-state) (dissoc (.-props instance-state) (:prop prop-spec)))
+              (let [^js instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))] 
+                (cond
+                  (js* "~{} === undefined" x)
+                  (set! (.-props instance-state) (dissoc (.-props instance-state) (:prop prop-spec)))
 
-                    :else
-                    (set! (.-props instance-state) (assoc (.-props instance-state) (:prop prop-spec) x)))
-                  (request-render (js* "this") false))))
+                  :else
+                  (set! (.-props instance-state) (assoc (.-props instance-state) (:prop prop-spec) x)))
+                (request-render (js* "this") false)))
             :configurable true}))
     (doseq [instance (.-instances static-state)]
       (let [^js instance-state (gobj/get instance PRIVATE-SYM)]
@@ -509,10 +514,10 @@ one sequence.
 
 (defonce ^:private component-classes (atom #{}))
 
-(defn component [{:keys [name props view focus]}]
+(defn component [{:keys [name props view focus] :as things}]
   (let [el-name (kw->el-name name)]
     (if-let [existing (js/customElements.get el-name)]
-      (patch-el-class existing props view focus)
+      (patch-el-class existing things)
       (let [new-class (js* "
 (class extends HTMLElement {
     constructor() {
@@ -527,7 +532,7 @@ one sequence.
 })" (= focus :delegate))]
         (gobj/set new-class PRIVATE-SYM #js{:instances #{}})
         (swap! component-classes conj new-class)
-        (patch-el-class new-class props view focus)
+        (patch-el-class new-class things)
         (js/customElements.define el-name new-class))))
   nil)
 

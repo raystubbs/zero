@@ -35,7 +35,7 @@
 
 (z/component
   :name ::todo
-  :props {:items :prop}
+  :props #{:items}
   :view (fn [{:keys [items]}]
           [:z/root:block
            :z/css "/css/main.css"
