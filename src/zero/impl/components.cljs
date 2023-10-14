@@ -109,13 +109,13 @@ one sequence.
     :svg SVG-NS
     nil))
 
-(defn- patch-listeners [^js/Node dom props]
-  (let [old-listeners (-> dom (gobj/get PROPS-SYM) :z/on)
-        listeners (-> props :z/on)]
-    (doseq [[type listener] old-listeners]
-      (.removeEventListener dom (name type) listener))
-    (doseq [[type listener] listeners]
-      (.addEventListener dom (name type) listener))))
+(defn- patch-listeners [^js/Node dom diff]
+  (doseq [[type [old-listener new-listener]] diff]
+    (let [type-str (name type)]
+      (when old-listener
+        (.removeEventListener dom type-str old-listener))
+      (when new-listener
+        (.addEventListener dom type-str new-listener)))))
 
 (defonce !class->fields-index (atom {}))
 
@@ -179,18 +179,58 @@ one sequence.
     :else
     (throw (ex-info "Can't convert given object to CSSStyleSheet" {:given x}))))
 
+(defn- diff-shallow [map-a map-b]
+  (reduce
+    (fn [diff key]
+      (let [val-a (get map-a key)
+            val-b (get map-b key)]
+        (if (= val-a val-b)
+          diff
+          (assoc diff key [val-a val-b]))))
+    {} (set (concat (keys map-a) (keys map-b)))))
+
+(defn diff-props [old-props new-props]
+  (let [all-keys (set (concat (keys new-props) (keys old-props)))]
+    (as-> all-keys $
+      (disj $ :z/style :z/on)
+      (reduce
+        (fn [diff key]
+          (let [new-val (get new-props key)
+                old-val (get old-props key)]
+            (if (= new-val old-val)
+              diff
+              (assoc diff key [old-val new-val]))))
+        {} $)
+      (reduce
+        (fn [diff key]
+          (if-not (contains? all-keys key)
+            diff
+            (let [inner-diff (diff-shallow (old-props key) (new-props key))]
+              (if (empty? inner-diff)
+                diff
+                (assoc diff key inner-diff)))))
+        $ [:z/style :z/on :z/aria]))))
+
 (defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props tag]
-  (when (not= props (gobj/get dom PROPS-SYM))
-    (let [prop-css (:z/css props)
+  (let [diff (diff-props (gobj/get dom PROPS-SYM) props)]
+    
+    ;; This has to happen whether or not the actual
+    ;; `:z/css` prop has changed, since the `tag` might
+    ;; have changed, and we have no way of checking that.
+    ;; It can be optimized a bit, not sure if it's worth it.
+    (let [css-prop (props :z/css)
           implicit-css (get-in ROOT-TAGS [tag :css])]
       (set! (.-adoptedStyleSheets dom)
-            (cond
-              (nil? prop-css) #js[implicit-css]
-              (coll? prop-css) (->> prop-css (map ->stylesheet-object) (into [implicit-css]) to-array)
-              :else #js[implicit-css (->stylesheet-object prop-css)])))
-    (patch-listeners dom props)
-    ;; TODO: element internals
-    (gobj/set dom PROPS-SYM props)))
+        (cond
+          (nil? css-prop) #js[implicit-css]
+          (coll? css-prop) (->> css-prop (map ->stylesheet-object) (into [implicit-css]) to-array)
+          :else #js[implicit-css (->stylesheet-object css-prop)])))
+    
+    (when-not (empty? diff)
+      (when-let [listeners-diff (diff :z/on)]
+        (patch-listeners dom listeners-diff))
+      ;; TODO: element internals (i.e aria, etc.)
+      (gobj/set dom PROPS-SYM props))))
 
 (defn- ->css-value [x]
   (cond
@@ -206,68 +246,71 @@ one sequence.
     :else
     (str x)))
 
-;; TODO: use clojure.data/diff to only patch changed things
 (defn- patch-props [^js/Node dom !binds props]
-  (when (not= props (gobj/get dom PROPS-SYM))
-    (patch-listeners dom props)
-    (let [fields-index (-> dom .-constructor class->fields-index)
-          set-prop (fn [dom prop-key prop-value]
-                     (let [adjusted-value (if (and DEBUG (= (.-nodeName dom) "LINK") (= prop-key :href))
-                                            (get @!css-href-overrides prop-value prop-value)
-                                            prop-value)]
-                       (if-let [field-name (get fields-index prop-key)]
-                         (gobj/set dom field-name adjusted-value)
-                         (.setAttribute dom (name prop-key) (if (true? adjusted-value) "" (str adjusted-value))))))]
-      (doseq [[k v] props]
-        (when (and v (not (namespace k)))
-          (cond
-            (satisfies? IWatchable v)
-            (if-let [existing (get @!binds v)]
-              (do
-                (swap! !binds update-in [v :binders] conj [dom k])
-                (set-prop dom k @(:current existing)))
-              (let [watch-uuid (random-uuid)
-                    !current (atom (if (satisfies? IDeref v) (deref v) nil))
-                    binders #{[dom k]}]
-                (add-watch
-                 v watch-uuid
-                 (fn [_ _ _ new-val]
-                   (reset! !current new-val)
-                   (doseq [[binder-dom binder-prop] (get-in @!binds [v :binders])]
-                     (set-prop binder-dom binder-prop new-val))))
-                (swap! !binds assoc v {:uuid watch-uuid :current !current :binders binders})
-                (set-prop dom k @!current)))
-
-            :else
-            (set-prop dom k v))))
-      (doseq [[k v] (gobj/get dom PROPS-SYM)]
-        (when (and v (not (namespace k)))
-          (when (and (satisfies? IWatchable v) (not= v (get props k)))
-            (let [binders (disj (get-in @!binds [v :binders]) [dom k])]
+  (let [diff (diff-props (or (gobj/get dom PROPS-SYM) {}) props)]
+    (when-not (empty? diff)
+      (when-some [listeners-diff (diff :z/on)]
+        (patch-listeners dom listeners-diff))
+      (let [fields-index (-> dom .-constructor class->fields-index)
+            set-prop (fn [dom prop-key prop-value]
+                       (let [adjusted-value (if (and DEBUG (= (.-nodeName dom) "LINK") (= prop-key :href))
+                                              (get @!css-href-overrides prop-value prop-value)
+                                              prop-value)]
+                         (if-let [field-name (get fields-index prop-key)]
+                           (gobj/set dom field-name adjusted-value)
+                           (if-not prop-value
+                             (.removeAttribute dom (name prop-key))
+                             (.setAttribute dom (name prop-key) (if (true? adjusted-value) "" (str adjusted-value)))))))
+            normal-props-diff (remove (comp namespace key) diff)]
+        (doseq [[k [old-val new-val]] normal-props-diff]
+          ;; when a binding expires
+          (when (satisfies? IWatchable old-val)
+            (let [binders (disj (get-in @!binds [old-val :binders]) [dom k])]
               (cond
                 (empty? binders)
                 (do
-                  (remove-watch v (get @!binds [v :uuid]))
-                  (swap! !binds dissoc v))
-
+                  (remove-watch old-val (get @!binds [old-val :uuid]))
+                  (swap! !binds dissoc old-val))
+                
                 :else
-                (swap! !binds assoc-in [v :binders] binders))))
-          (when (and v (not (get props k)))
-            (if-let [prop-name (get fields-index k)]
-              (gobj/set dom prop-name (js* "undefined"))
-              (.removeAttribute dom k)))))
-      (let [style-obj (.-style dom)]
-        (doseq [[k v] (:z/style props)]
-          (if-not v
-            (.removeProperty style-obj (name k))
-            (.setProperty style-obj (name k) (->css-value v))))
-        (doseq [[k _] (:z/style (gobj/get dom PROPS-SYM))]
-          (when-not (contains? (:z/style props) k)
-            (.removeProperty style-obj (name k)))))
-      (if-let [class (:z/class props)]
-        (.setAttribute dom "class" (cond->> class (sequential? class) flatten :always (str/join " ")))
-        (.removeAttribute dom "class"))
-      (gobj/set dom PROPS-SYM props))))
+                (swap! !binds assoc-in [old-val :binders] binders))))
+          
+          ;; now set the actual prop, setting up a new
+          ;; biding if necessary
+          (cond
+            (satisfies? IWatchable new-val)
+            (if-let [existing (get @!binds new-val)]
+              (do
+                (swap! !binds update-in [new-val :binders] conj [dom k])
+                (set-prop dom k @(:current existing)))
+              (let [watch-uuid (random-uuid)
+                    !current (atom (if (satisfies? IDeref new-val) (deref new-val) nil))
+                    binders #{[dom k]}]
+                (add-watch
+                  new-val watch-uuid
+                  (fn [_ _ _ x]
+                    (reset! !current x)
+                    (doseq [[binder-dom binder-prop] (get-in @!binds [new-val :binders])]
+                      (set-prop binder-dom binder-prop x))))
+                (swap! !binds assoc new-val {:uuid watch-uuid :current !current :binders binders})
+                (set-prop dom k @!current)))
+
+            :else
+            (set-prop dom k new-val)))
+        
+        ;; patch styles
+        (when-let [style-diff (diff :z/style)]
+          (let [style-obj (.-style dom)]
+            (doseq [[k [_ new-val]] style-diff]
+              (if-not new-val
+                (.removeProperty style-obj (name k))
+                (.setProperty style-obj (name k) (->css-value new-val))))))
+        
+        ;; patch classes
+        (if-let [[_ class] (diff :z/class)]
+          (.setAttribute dom "class" (cond->> class (sequential? class) flatten :always (str/join " ")))
+          (.removeAttribute dom "class"))
+        (gobj/set dom PROPS-SYM props)))))
 
 (defn- kw->el-name [tag]
   (->
