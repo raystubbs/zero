@@ -205,7 +205,7 @@ one sequence.
         (fn [diff key]
           (if-not (contains? all-keys key)
             diff
-            (let [inner-diff (diff-shallow (old-props key) (new-props key))]
+            (let [inner-diff (diff-shallow (get old-props key) (get new-props key))]
               (if (empty? inner-diff)
                 diff
                 (assoc diff key inner-diff)))))
@@ -218,7 +218,7 @@ one sequence.
     ;; `:z/css` prop has changed, since the `tag` might
     ;; have changed, and we have no way of checking that.
     ;; It can be optimized a bit, not sure if it's worth it.
-    (let [css-prop (props :z/css)
+    (let [css-prop (get props :z/css)
           implicit-css (get-in ROOT-TAGS [tag :css])]
       (set! (.-adoptedStyleSheets dom)
         (cond
@@ -307,9 +307,10 @@ one sequence.
                 (.setProperty style-obj (name k) (->css-value new-val))))))
         
         ;; patch classes
-        (if-let [[_ class] (diff :z/class)]
-          (.setAttribute dom "class" (cond->> class (sequential? class) flatten :always (str/join " ")))
-          (.removeAttribute dom "class"))
+        (when-let [[_ class] (diff :z/class)]
+          (if (nil? class)
+            (.removeAttribute dom "class")
+            (.setAttribute dom "class" (cond->> class (sequential? class) flatten :always (str/join " ")))))
         (gobj/set dom PROPS-SYM props)))))
 
 (defn- kw->el-name [tag]
