@@ -10,8 +10,8 @@ Construct an action.
 
 ```clojure
 [:button
- :on-click (act :do-something (<< :inject-something)
-                :do-something-else \"some data\")
+ :on-click (act [:do-something (<< :inject-something)]
+                [:do-something-else \"some data\"])
  \"Click Me!\"]
 
 ```
@@ -24,13 +24,7 @@ printed, etc. as data.
   (let [[props effects] (if (map? (first things))
                           [(first things) (rest things)]
                           [{} things])]
-    (->> effects
-          (partition-all 2)
-          (mapv (fn [effect]
-                  (if (not= 2 (count effect))
-                    (throw (ex-info "Missing payload for effect" {:effect-key (first effect)}))
-                    effect)))
-          (act/Action. props))))
+    (zero.impl.actions/Action. props effects)))
 
 (def effect "
 MultiFn used to define effects.
@@ -53,28 +47,19 @@ Construct a binding.
 
 ```clojure
 [:input
- :value (bnd :db/something || \"Default Value\")]
+ :value (bnd {:default \"foo\"} :db/something)]
 ```
 
-A binding is a reference to an external data stream,
-represented as data.  Bindings are IWatchable, and
-any updates in the underlying data stream will be
-reflected in the properties they're bound to.  Bindings
-can also be compared, hashed, printed, etc. as data.
+A binding is a reference to an external data stream.
+Bindings are IWatchable, and any updates in the
+underlying data stream will be reflected in the properties
+they're bound to.  Bindings can also be compared, hashed,
+printed, etc. as data.
 " [& things]
-  (let [[props stream-key other] (if (map? (first things))
+  (let [[props stream-key args] (if (map? (first things))
                                    [(first things) (second things) (nthrest things 2)]
-                                   [{} (first things) (rest things)])
-        sep-index (loop [cur-idx 0
-                         [x & xs] other]
-                    (cond
-                      (= x bnd/||) cur-idx
-                      (nil? x) nil
-                      :else (recur (inc cur-idx) xs)))
-        [args [_ default]] (if sep-index
-                             (split-at sep-index other)
-                             [other nil])]
-    (bnd/binding props stream-key (vec args) default)))
+                                   [{} (first things) (rest things)])]
+    (zero.impl.bindings/Binding. props stream-key (vec args))))
 
 (def stream "
 MultiFn used to define data streams.
@@ -95,43 +80,30 @@ for each set of args used with the stream; until the
 stream has been spun down and must be restarted.
 " bnd/stream)
 
-(def || "
-Used as a marker to separate bindings args from the
-default value.
-" bnd/||)
-
 (defn << "
 Used to indicate an injection point in actions or bindings.
 ```clojure
   (act :do-something (<< :inject-some-data))
   (bnd :something (<< :inject-some-data))
 
-  (defmethod inject :inject-some-data [_ _args _ctx]
+  (defmethod inject :inject-some-data [_ _ctx]
     \"Some data\")
 ```
-
-For actions the injection occurs for the full action
-(all effects) before any of the effects can be dispatched. If
-an error occurs in the injection then the action will be abandoned.
-
-For bindings the injection occurs before spinning up
-the respective data stream.  If an injection error occurs
-the stream will fail to spin up.
-" [injector & args]
-  `(inj/<< ~injector ~@args))
+" [injector-key & args]
+  (zero.impl.injection/Injection. injector-key args))
 
 (def inject "
 MultiFn used to define injection handlers.
 ```clojure
-(defmethod :event/data [_ _ {:keys [event]}]
+(defmethod inject :event/data [_ {:keys [event]}]
   (.-data event))
 
 (act ::echo (<< :event/data))
 ```
 
-For action injections these will receive an `event`
-context value with the event that triggered the
-action.
+When dispatched from an action, injectors will receive
+an `event` context value containing captured fields from
+the original event.
 " inj/inject)
 
 (defn component "
