@@ -18,7 +18,7 @@
     (let [args-w-injections (apply-injections args {})]
       (let [!stream-ch (chan)
             !kill-ch (chan)
-            kill-fn (stream stream-key #(put! !stream-ch (if (some? %) % ::nil)) args-w-injections)]
+            kill-fn (apply stream stream-key #(put! !stream-ch (if (some? %) % ::nil)) args-w-injections)]
         (swap! !stream-states update stream-ident merge
           {:kill-ch !kill-ch
            :kill-fn kill-fn})

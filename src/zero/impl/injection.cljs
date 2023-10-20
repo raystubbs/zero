@@ -14,7 +14,7 @@
       (if (contains? @!cache cache-key)
         (get @!cache cache-key)
         (try
-          (let [r (apply inject injector-key context (map #(if (instance? Injection %) (injected % context !cache) %) args))]
+          (let [r (apply inject injector-key context (postwalk #(if (instance? Injection %) (injected % context !cache) %) args))]
             (swap! !cache assoc cache-key r)
             r)
           (catch :default e
@@ -22,7 +22,7 @@
             nil)))))
 
   IEquiv
-  (-equiv [_ other]
+  (-equiv [_ ^Injection other]
     (and
       (= injector-key (.-injector-key other))
       (= args (.-args other))))
