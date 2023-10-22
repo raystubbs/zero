@@ -4,6 +4,9 @@
           {:target :browser
            :output-dir "pub/js"
            :asset-path "/js"
-           :compiler-options {:infer-externs true :warnings {:redef false}}
+           :compiler-options {:infer-externs true
+                              :warnings {:redef false}
+                              :output-feature-set :es-next}
+           :build-hooks [(shadow.cljs.build-report/hook)]
            :devtools {:watch-dir "pub/css" :watch-path "/css"}
-           :modules {:main {:init-fn demo/init}}}}}
+           :modules {:app {:entries [zero.demo.app]}}}}}
