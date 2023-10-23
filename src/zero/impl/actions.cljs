@@ -32,22 +32,24 @@
           (.preventDefault ev))
         (when (:stop-propagation? props)
           (.stopPropagation ev))
-        (let [effects-w-injections (apply-injections effects context)] 
-          (when DEBUG
-            (js/console.groupCollapsed this)
-            (js/console.info "Event:" ev))
-          (doseq [[effect-key & args :as fx] effects-w-injections]
-            (try
+        (js/setTimeout
+          (fn []
+            (let [effects-w-injections (apply-injections effects context)]
               (when DEBUG
-                (js/console.info "Effect:" fx))
-              (apply effect effect-key args)
-              (catch :default e
-                (js/console.error
-                  "Error in effect handler"
-                  {:effect fx}
-                  e))))
-          (when DEBUG
-            (js/console.groupEnd))))))
+                (js/console.groupCollapsed this)
+                (js/console.info "Event:" ev))
+              (doseq [[effect-key & args :as fx] effects-w-injections]
+                (try
+                  (when DEBUG
+                    (js/console.info "Effect:" fx))
+                  (apply effect effect-key args)
+                  (catch :default e
+                    (js/console.error
+                      "Error in effect handler"
+                      {:effect fx}
+                      e))))
+              (when DEBUG
+                (js/console.groupEnd))))))))
   
   IEquiv
   (-equiv [^js this ^js other]

@@ -1,6 +1,7 @@
 (ns zero.impl.components
   (:require
    [zero.impl.base :as base]
+   [zero.impl.injection :refer [apply-injections inject]]
    [clojure.string :as str]
    [goog.object :as gobj]
    [goog :refer [DEBUG]]))
@@ -468,11 +469,14 @@ one sequence.
                                    (when (.-connected instance-state)
                                      (when (and focus (< (.-tabIndex dom) 0))
                                        (set! (.-tabIndex dom) 0))
-                                     (render
-                                       (.-shadow instance-state)
-                                       (.-internals instance-state)
-                                       (.-binds instance-state)
-                                       (view (.-props instance-state)))
+                                     (try
+                                       (render
+                                         (.-shadow instance-state)
+                                         (.-internals instance-state)
+                                         (.-binds instance-state)
+                                         (view (.-props instance-state)))
+                                       (catch :default e
+                                         (js/console.error "Error rendering component" name e)))
                                      (let [shadow (.-shadow instance-state)
                                            event-type (if connecting? "connect" "update")]
                                        (js/setTimeout
@@ -583,61 +587,10 @@ one sequence.
 (defn component-name [k]
   (kw->el-name k))
 
-(when-not (js/customElements.get (kw->el-name :z/echo))
-  (let [z-echo-class (js* "
-(class extends HTMLElement {
-    constructor() {
-        super();
-        this[zero.impl.components.PRIVATE_SYM] = {
-            shadow: this.attachShadow({mode: 'open'}),
-            vdom: null
-        };
-        this[zero.impl.components.PRIVATE_SYM].shadow.adoptedStyleSheets = [zero.impl.components.DEFAULT_CSS];
-    }
-})")
-        request-render (fn [^js/Node dom]
-                         (let [^js instance-state (gobj/get dom PRIVATE-SYM)]
-                           (when (and (not (.-frameId instance-state)) (.-connected instance-state))
-                             (set! (.-frameId instance-state)
-                                   (js/requestAnimationFrame
-                                     (fn []
-                                       (set! (.-frameId instance-state) nil)
-                                       (render (.-shadow instance-state) nil (.-binds instance-state) (.-vdom dom))))))))]
-
-    (js/Object.defineProperties
-      (.-prototype z-echo-class)
-      #js{:connectedCallback
-          #js{:value
-              (fn []
-                (let [this (js* "this")
-                      ^js instance-state (gobj/get this PRIVATE-SYM)]
-                  (set! (.-connected instance-state) true)
-                  (set! (.-binds instance-state) (atom {}))
-                  (request-render this)))}
-          :disconnectedCallback
-          #js{:value
-              (fn []
-                (let [this (js* "this")
-                      ^js instance-state (gobj/get this PRIVATE-SYM)]
-                  (set! (.-connected instance-state) false)
-                  (doseq [^js/Node child-dom (-> instance-state .-shadow .-childNodes array-seq)]
-                    (cleanup-dom child-dom (.-binds instance-state))
-                    (.remove child-dom))
-                  (assert (= {} @(.-binds instance-state)))))}
-          :vdom
-          #js{:get
-              (fn []
-                (let [this (js* "this")
-                      ^js instance-state (gobj/get this PRIVATE-SYM)]
-                  (.-vdom instance-state)))
-              :set
-              (fn [x]
-                (let [this (js* "this")
-                      ^js instance-state (gobj/get this PRIVATE-SYM)]
-                  (set! (.-vdom instance-state) x)
-                  (request-render this)))}})
-    (js/customElements.define (kw->el-name :z/echo) z-echo-class)))
-
+(component
+  {:name  :z/echo
+   :props #{:vdom}
+   :view  (fn [{:keys [vdom]}] vdom)})
 
 (defonce 
   _only-do-this-once
