@@ -2,7 +2,7 @@
   (:require
    [clojure.walk :refer [postwalk]]))
 
-(defmulti inject identity)
+(def ^:private !injectors (atom {}))
 
 (defprotocol IInjection
   (injected [o context !cache]))
@@ -14,7 +14,9 @@
       (if (contains? @!cache cache-key)
         (get @!cache cache-key)
         (try
-          (let [r (apply inject injector-key context (postwalk #(if (instance? Injection %) (injected % context !cache) %) args))]
+          (let [injector (or (get @!injectors injector-key)
+                           (throw (ex-info "No injector registered for key" {:injector-key injector-key})))
+                r (apply injector context (postwalk #(if (instance? Injection %) (injected % context !cache) %) args))]
             (swap! !cache assoc cache-key r)
             r)
           (catch :default e
@@ -46,3 +48,6 @@
             (injected form context !cache)
             form))
         x))))
+
+(defn reg-injector [injector-key f]
+  (swap! !injectors assoc injector-key f))

@@ -19,7 +19,14 @@
 (defprotocol IAction
   (perform! [this ^js/Event ev]))
 
-(defmulti effect identity)
+(def ^:private !effects (atom {}))
+
+(defn do-effect [[effect-key & args :as effect]]
+  (let [effect-fn (or (get @!effects effect-key)
+                    (throw (ex-info "No effect registered for key" {:effect-key effect-key})))]
+    (when DEBUG
+      (js/console.info :effect effect))
+    (apply effect-fn args)))
 
 (extend-type Action
   IAction
@@ -37,16 +44,14 @@
             (let [effects-w-injections (apply-injections effects context)]
               (when DEBUG
                 (js/console.groupCollapsed this)
-                (js/console.info "Event:" ev))
-              (doseq [[effect-key & args :as fx] effects-w-injections]
+                (js/console.info :event ev))
+              (doseq [effect effects-w-injections]
                 (try
-                  (when DEBUG
-                    (js/console.info "Effect:" fx))
-                  (apply effect effect-key args)
+                  (do-effect effect)
                   (catch :default e
                     (js/console.error
                       "Error in effect handler"
-                      {:effect fx}
+                      {:effect effect}
                       e))))
               (when DEBUG
                 (js/console.groupEnd))))))))
@@ -68,3 +73,19 @@
              ['act]
              (when (seq (.-props this)) [(.-props this)])
              (.-effects this))))))
+
+(defn reg-effect [effect-key f]
+  (swap! !effects assoc effect-key f))
+
+(reg-effect
+  :cond
+  (fn [& cases]
+    (when-let [[_ & effects] (first (filter first cases))]
+      (doseq [effect effects]
+        (do-effect effect)))))
+
+(reg-effect
+  :effects
+  (fn [effects]
+    (doseq [effect effects]
+      (do-effect effect))))

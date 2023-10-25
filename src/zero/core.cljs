@@ -26,21 +26,24 @@ printed, etc. as data.
                           [{} things])]
     (zero.impl.actions/Action. props effects)))
 
-(def effect "
-MultiFn used to define effects.
+(defn reg-effect "
+Register one or more effects.
 
 ```clojure
-(defmethod effect ::echo [_ payload _]
-  (prn payload))
+(reg-effect
+ ::echo
+ (fn [& args]
+   (prn args))
+
+ ::echo2
+ (fn [& args]
+  (prn args)))
 
 (act ::echo \"Hello, World!\")
-
-(defmethod effect :event/trace [_ _ {:keys [event]}]
-  (js/console.log event))
-
-(act :event/trace nil)
 ```
-" act/effect)
+" [& {:as effect-specs}]
+  (doseq [[effect-key effect-fn] effect-specs]
+    (act/reg-effect effect-key effect-fn)))
 
 (defn bnd "
 Construct a binding.
@@ -61,24 +64,32 @@ printed, etc. as data.
                                    [{} (first things) (rest things)])]
     (zero.impl.bindings/Binding. props stream-key (vec args))))
 
-(def stream "
-MultiFn used to define data streams.
+(defn reg-stream "
+Register one or more data streams.
 
 ```clojure
 (defonce !db (atom {}))
 
-(defmethod stream :db [_ rx path]
+(reg-stream
+ :db
+ (fn [rx path]
   (rx (get-in @!db path)))
+
+ :other
+ (fn [rx]
+  (rx \"thing\")))
 ```
 
 If a function is returned it will be called to cleanup
-the stream when it's spun down.
+the stream once it's spun down.
 
 Each pair of `[stream-key args]` represents a unique
 stream instance, so the method will be called only once
 for each set of args used with the stream; until the
 stream has been spun down and must be restarted.
-" bnd/stream)
+" [& {:as stream-specs}]
+  (doseq [[stream-key stream-fn] stream-specs]
+    (bnd/reg-stream stream-key stream-fn)))
 
 (defn << "
 Used to indicate an injection point in actions or bindings.
@@ -86,17 +97,20 @@ Used to indicate an injection point in actions or bindings.
   (act :do-something (<< :inject-some-data))
   (bnd :something (<< :inject-some-data))
 
-  (defmethod inject :inject-some-data [_ _ctx]
-    \"Some data\")
+  (reg-injector
+   :inject-some-data
+   (fn [_ _ctx]
+    \"Some data\"))
 ```
 " [injector-key & args]
   (zero.impl.injection/Injection. injector-key args))
 
-(def inject "
-MultiFn used to define injection handlers.
+(defn reg-injector "
+Register one or more data injectors.
 ```clojure
-(defmethod inject :event/data [_ {:keys [event]}]
-  (.-data event))
+(reg-injector
+  :event/data (fn [{:keys [event]}] (.-data event))
+  :event/type (fn [{:keys [event]}] (.-type event)))
 
 (act ::echo (<< :event/data))
 ```
@@ -104,7 +118,9 @@ MultiFn used to define injection handlers.
 When dispatched from an action, injectors will receive
 an `event` context value containing captured fields from
 the original event.
-" inj/inject)
+" [& {:as injector-specs}]
+  (doseq [[injector-key injector-fn] injector-specs]
+    (inj/reg-injector injector-key injector-fn)))
 
 (defn component "
 Create a component.
@@ -139,3 +155,6 @@ The custom element name that will be generated for a given
 keyword.
 "[kw]
   (c/component-name kw))
+
+(defn do-effect [effect]
+  (act/do-effect effect))

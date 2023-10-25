@@ -1,10 +1,15 @@
 (ns zero.impl.components
   (:require
    [zero.impl.base :as base]
-   [zero.impl.injection :refer [apply-injections inject]]
    [clojure.string :as str]
    [goog.object :as gobj]
    [goog :refer [DEBUG]]))
+
+;; generic unique id seq
+(defonce ^:private uid-seq (atom (js/BigInt 0)))
+
+(defn- gen-uid []
+  (swap! uid-seq + (js/BigInt 1)))
 
 (defn- flatten-body [body]
   (mapcat
@@ -435,10 +440,58 @@ one sequence.
         :always (assoc :prop prop-name)
         (not (:field prop-spec)) (assoc :field (-> prop-name name base/cammel-case))))))
 
+(defonce ^:private !dirty (atom #{}))
+(defonce ^:private !render-frame-id (atom nil))
+
+(defn- do-render []
+  (reset! !render-frame-id nil)
+  (while (seq @!dirty)
+    (let [batch @!dirty]
+      (reset! !dirty #{})
+      (doseq [^js/Node dom batch]
+        (let [^js static-state (-> dom .-constructor (gobj/get PRIVATE-SYM))
+              ^js instance-state (gobj/get dom PRIVATE-SYM)
+              focus (.-focus static-state)
+              view (.-view static-state)
+              render-props (gobj/get dom PROPS-SYM)]
+
+          ;; if it needs to be focusable, but explicit tabIndex wasn't set
+          (when (and
+                  focus
+                  (not (or (contains? render-props :tab-index) (contains? render-props :tabindex)))
+                  (< (.-tabIndex dom) 0))
+            (set! (.-tabIndex dom) 0))
+
+          ;; render the thing
+          (try
+            (render
+              (.-shadow instance-state)
+              (.-internals instance-state)
+              (.-binds instance-state)
+              (view (.-props instance-state)))
+            (catch :default e
+              (js/console.error "Error rendering component" name e)))
+
+          ;; dispatch lifecycle events
+          (let [shadow (.-shadow instance-state)
+                event-type (if (.-connected instance-state)
+                             "update"
+                             (do
+                               (set! (.-connected instance-state) true)
+                               "connect"))]
+            (js/setTimeout
+              (fn []
+                (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false}))
+                (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))
+
+(defn- request-render [^js/Node dom]
+  (swap! !dirty conj dom)
+  (when-not @!render-frame-id
+    (reset! !render-frame-id (js/requestAnimationFrame do-render))))
+
 (defn- patch-el-class [class {:keys [props view focus name]}]
   (let [^js proto (.-prototype class)
         ^js static-state (gobj/get class PRIVATE-SYM)
-        version (or (some-> static-state .-version inc) 0)
         props-map (cond
                     (set? props) (->> props (map #(vector % :field)) (into {}))
                     (map? props) props
@@ -457,33 +510,11 @@ one sequence.
                                (let [normalized-spec (normalize-prop-spec prop-name prop-spec)]
                                  (when-let [field-name (:field normalized-spec)]
                                    [field-name normalized-spec]))))
-                           (into {}))
-        request-render (fn [^js/Node dom connecting?]
-                         (let [^js instance-state (gobj/get dom PRIVATE-SYM)]
-                           (when (and (not (.-renderFrameId instance-state))
-                                   (.-connected instance-state))
-                             (set! (.-renderFrameId instance-state)
-                               (js/requestAnimationFrame
-                                 (fn [_]
-                                   (set! (.-renderFrameId instance-state) nil)
-                                   (when (.-connected instance-state)
-                                     (when (and focus (< (.-tabIndex dom) 0))
-                                       (set! (.-tabIndex dom) 0))
-                                     (try
-                                       (render
-                                         (.-shadow instance-state)
-                                         (.-internals instance-state)
-                                         (.-binds instance-state)
-                                         (view (.-props instance-state)))
-                                       (catch :default e
-                                         (js/console.error "Error rendering component" name e)))
-                                     (let [shadow (.-shadow instance-state)
-                                           event-type (if connecting? "connect" "update")]
-                                       (js/setTimeout
-                                         (fn []
-                                           (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false}))
-                                           (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))))]
-    (set! (.-version static-state) version)
+                           (into {}))]
+    (set! (.-version static-state) (or (some-> static-state .-version inc) 0))
+    (set! (.-view static-state) view)
+    (set! (.-focus static-state) focus)
+    (set! (.-name static-state) name)
     (swap! !class->fields-index dissoc class)
     (js/Object.defineProperty
      class "observedAttributes"
@@ -497,9 +528,8 @@ one sequence.
                (let [^js/Node this (js* "this")
                      ^js instance-state (gobj/get this PRIVATE-SYM)]
                  (set! (.-instances static-state) (conj (.-instances static-state) this))
-                 (set! (.-connected instance-state) true)
                  (set! (.-binds instance-state) (atom {}))
-                 (request-render this true)))
+                 (request-render this)))
              :configurable true}
          :disconnectedCallback
          #js{:value
@@ -508,6 +538,7 @@ one sequence.
                      ^js instance-state (gobj/get this PRIVATE-SYM)
                      ^js/ShadowRoot shadow (.-shadow instance-state)]
                  (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false}))
+                 (swap! !dirty disj this)
                  (set! (.-instances static-state) (disj (.-instances static-state) this))
                  (set! (.-connected instance-state) false)
                  (doseq [^js/Node child-dom (-> shadow .-childNodes array-seq)]
@@ -533,7 +564,8 @@ one sequence.
                        (set!
                          (.-props instance-state)
                          (assoc (.-props instance-state) (:prop prop-spec) final-val))
-                       (request-render this false))))))
+                       (when (.-connected instance-state)
+                         (request-render this)))))))
              :configurable true}})
     (doseq [[field-name prop-spec] field->prop-spec]
       (js/Object.defineProperty
@@ -544,21 +576,18 @@ one sequence.
               (-> (js* "this") (gobj/get PRIVATE-SYM) .-props (get (:prop prop-spec))))
             :set
             (fn [x]
-              (let [^js instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))] 
+              (let [^js instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))]
                 (cond
                   (js* "~{} === undefined" x)
                   (set! (.-props instance-state) (dissoc (.-props instance-state) (:prop prop-spec)))
 
                   :else
                   (set! (.-props instance-state) (assoc (.-props instance-state) (:prop prop-spec) x)))
-                (request-render (js* "this") false)))
+                (when (.-connected instance-state)
+                  (request-render (js* "this")))))
             :configurable true}))
     (doseq [instance (.-instances static-state)]
-      (let [^js instance-state (gobj/get instance PRIVATE-SYM)]
-        (when-let [frame-id (.-renderFrameId instance-state)]
-          (js/cancelAnimationFrame frame-id)
-          (set! (.-renderFrameId instance-state) nil))
-        (request-render instance false)))))
+      (request-render instance))))
 
 (defonce ^:private component-classes (atom #{}))
 
@@ -592,7 +621,7 @@ one sequence.
    :props #{:vdom}
    :view  (fn [{:keys [vdom]}] vdom)})
 
-(defonce 
+(defonce
   _only-do-this-once
   (when DEBUG
     (letfn

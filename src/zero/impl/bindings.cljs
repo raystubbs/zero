@@ -4,7 +4,7 @@
     [cljs.core.async :refer [chan put! alts! go]]))
 
 (defonce !stream-states (atom {}))
-(defmulti stream identity)
+(defonce !stream-fns (atom {}))
 
 (defn- kill-stream [stream-ident]
   (let [{:keys [kill-ch kill-fn]} (get @!stream-states stream-ident)]
@@ -15,31 +15,32 @@
 (defn- boot-stream [[stream-key args :as stream-ident] new-watch]
   (swap! !stream-states assoc stream-ident {:watches (conj {} new-watch)})
   (go
-    (let [args-w-injections (apply-injections args {})]
-      (let [!stream-ch (chan)
-            !kill-ch (chan)
-            kill-fn (apply stream stream-key #(put! !stream-ch (if (some? %) % ::nil)) args-w-injections)]
-        (swap! !stream-states update stream-ident merge
-          {:kill-ch !kill-ch
-           :kill-fn kill-fn})
+    (let [!stream-ch (chan)
+          !kill-ch (chan)
+          stream-fn (or (get @!stream-fns stream-key) (throw (ex-info "No stream registered for key" {:stream-key stream-key})))
+          kill-fn (apply stream-fn #(put! !stream-ch (if (some? %) % ::nil)) (apply-injections args {}))]
+      (swap! !stream-states update stream-ident merge
+        {:kill-ch !kill-ch
+         :kill-fn kill-fn
+         :stream-ch !stream-ch})
 
-        (loop [[value ch] (alts! [!stream-ch !kill-ch])]
-          (if (= ch !kill-ch)
-            nil
-            (when (some? value)
-              (let [new-val (if (= value ::nil) nil value)
-                    {old-val :current watches :watches} (get @!stream-states stream-ident)]
-                (swap! !stream-states assoc-in [stream-ident :current] new-val)
-                (doseq [[[binding key] f] watches]
-                  (try
-                    (f key binding old-val new-val)
-                    (catch :default e
-                      (js/console.error
-                        "Error in stream watcher"
-                        (prn {:stream stream-ident})
-                        e)))))
-              (recur (alts! [!stream-ch !kill-ch])))))
-        true))))
+      (loop [[value ch] (alts! [!stream-ch !kill-ch])]
+        (if (= ch !kill-ch)
+          nil
+          (when (some? value)
+            (let [new-val (if (= value ::nil) nil value)
+                  {old-val :current watches :watches} (get @!stream-states stream-ident)]
+              (swap! !stream-states assoc-in [stream-ident :current] new-val)
+              (doseq [[[binding key] f] watches]
+                (try
+                  (f key binding old-val new-val)
+                  (catch :default e
+                    (js/console.error
+                      "Error in stream watcher"
+                      {:stream stream-ident}
+                      e)))))
+            (recur (alts! [!stream-ch !kill-ch])))))
+      true)))
 
 (deftype Binding [props stream-key args]
   IDeref
@@ -84,3 +85,9 @@
           (when (seq props)
             [props])
           args)))))
+
+(defn reg-stream [stream-key f]
+  (swap! !stream-fns assoc stream-key f)
+  (doseq [[[_ args :as stream-ident] {!stream-ch :stream-ch}] (filter #(= stream-key (-> % key first)) @!stream-states)]
+    (swap! !stream-states assoc-in [stream-ident :kill-fn]
+      (apply f #(put! !stream-ch (if (some? %) % ::nil)) (apply-injections args {})))))
