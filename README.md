@@ -193,12 +193,14 @@ value semantics (i.e comparable, hashable, printable, immutable).  These are use
 in combination with data stream definitions to create a basic subscription system.
 
 ```clojure
-(defmethod z/stream :random [_ rx & _args]
- (let [interval-id (js/setInterval #(rx (rand)) 5000)]
-  ;; return a cleanup function, this will be called when
-  ;; the stream winds down (i.e when nothing is using it)
-  (fn []
-    (js/clearInterval interval-id))))
+(z/reg-stream
+  :random
+  (fn [rx & _args]
+    (let [interval-id (js/setInterval #(rx (rand)) 5000)]
+     ;; return a cleanup function, this will be called when
+     ;; the stream winds down (i.e when nothing is using it)
+     (fn []
+       (js/clearInterval interval-id)))))
 
 (z/component 
  :name ::reactive
@@ -215,12 +217,14 @@ Bindings are `IWatchable` and `IDeref`, take advantage of this to create
 data streams derived from existing ones.
 
 ```clojure
-(defmethod z/stream :derived [_ rx offset]
-  (add-watch (bnd :random) ::derived
-    (fn [_ _ _ random]
-      (rx (+ random offset))))
-  (fn cleanup-derived []
-    (remove-watch (bnd :random) ::derived)))
+(z/reg-stream
+  :derived
+  (fn [_ rx offset]
+    (add-watch (bnd :random) ::derived
+      (fn [_ _ _ random]
+        (rx (+ random offset))))
+    (fn cleanup-derived []
+      (remove-watch (bnd :random) ::derived))))
 ```
 
 One thing to remember is that bindings are _values_, watching/unwatching
@@ -235,12 +239,16 @@ of _effects_.
 ```clojure
 (defonce !db (atom {:count 0}))
 
-(defmethod z/stream ::count [_ rx]
- (add-watch !db ::count (fn [_ _ _ new-val] (rx new-val)))
- #(remove-watch !db ::count))
+(z/reg-stream
+  ::count
+  (fn [rx]
+    (add-watch !db ::count (fn [_ _ _ new-val] (rx new-val)))
+    #(remove-watch !db ::count)))
 
-(defmethod z/effect ::increase-count [_ amount]
- (swap! !db update :count + amount))
+(z/reg-effect
+  ::increase-count
+  (fn [amount]
+    (swap! !db update :count + amount)))
 
 (z/component
   :name ::incrementing-button
@@ -262,8 +270,10 @@ and pass it into an effect handler.  This allows effects to target
 the native DOM, or extract data from the DOM or an event.
 
 ```clojure
-(defmethod z/inject :input/value [_ {:keys [^js event]} & _args]
- (-> event .-target .-value))
+(z/reg-injector
+  :input/value
+  (fn [{:keys [^js event]} & _args]
+    (-> event .-target .-value)))
 
 (z/component
  :name ::example
