@@ -78,9 +78,8 @@ this makes it super easy to avoid name collisions.
 ## Focus
 Web components aren't focusable by default.  To make your
 component focusable use the `:focus` option.  This can be:
-- `true` - implicitly sets `tabindex="0"` on instances, making them focusable
-- `:delegate` - same as above, but also sets the [`delegatesFocus`][0]
-  option on the component's `ShadowRoot`
+- `:self` - implicitly sets `tabindex="0"` on instances, making them focusable
+- `:delegate` - sets the [`delegatesFocus`][0] option on the component's `ShadowRoot`
 
 ## Styling
 There are a few ways to apply styles to your components:

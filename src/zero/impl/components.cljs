@@ -457,7 +457,7 @@ one sequence.
 
           ;; if it needs to be focusable, but explicit tabIndex wasn't set
           (when (and
-                  focus
+                  (= focus :self)
                   (not (or (contains? render-props :tab-index) (contains? render-props :tabindex)))
                   (< (.-tabIndex dom) 0))
             (set! (.-tabIndex dom) 0))
@@ -470,7 +470,7 @@ one sequence.
               (.-binds instance-state)
               (view (.-props instance-state)))
             (catch :default e
-              (js/console.error "Error rendering component" name e)))
+              (js/console.error "Error rendering component" (.-name static-state) e)))
 
           ;; dispatch lifecycle events
           (let [shadow (.-shadow instance-state)
