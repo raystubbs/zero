@@ -97,6 +97,7 @@ one sequence.
   (doto (js/CSSStyleSheet.) (.replaceSync s)))
 
 (defonce ^:private PROPS-SYM (js/Symbol "zProps"))
+(defonce ^:private LISTENER-ABORT-CONTROLLERS-SYM (js/Symbol "zListenerAbortControllers"))
 (defonce ^:private MARK-SYM (js/Symbol "zMark"))
 (defonce ^:private HTML-NS "http://www.w3.org/1999/xhtml")
 (defonce ^:private SVG-NS "http://www.w3.org/2000/svg")
@@ -119,9 +120,15 @@ one sequence.
   (doseq [[type [old-listener new-listener]] diff]
     (let [type-str (name type)]
       (when old-listener
-        (.removeEventListener dom type-str old-listener))
+        (let [abort-controllers (gobj/get dom LISTENER-ABORT-CONTROLLERS-SYM)
+              abort-controller (get abort-controllers old-listener)]
+          (.abort abort-controller)
+          (gobj/set dom LISTENER-ABORT-CONTROLLERS-SYM (dissoc abort-controllers old-listener))))
       (when new-listener
-        (.addEventListener dom type-str new-listener)))))
+        (let [abort-controller (js/AbortController.)
+              abort-controllers (assoc (gobj/get dom LISTENER-ABORT-CONTROLLERS-SYM) new-listener abort-controller)]
+          (gobj/set dom LISTENER-ABORT-CONTROLLERS-SYM abort-controllers)
+          (.addEventListener dom type-str new-listener #js{:signal (.-signal abort-controller)}))))))
 
 (defonce !class->fields-index (atom {}))
 
