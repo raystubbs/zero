@@ -31,9 +31,8 @@
 (extend-type Action
   IAction
   (perform! [^js this ^js/Event ev]
-    (let [context {:event (gobj/clone ev)}
-          props (.-props this) 
-          effects (.-effects this)]
+    (let [props (.-props this)
+          effects (apply-injections (.-effects this) {:event ev})]
       (when (or (not (:skip-bubbled? props)) (= (.-currentTarget ev) (.-target ev)))
         (when (:prevent-default? props)
           (.preventDefault ev))
@@ -41,20 +40,19 @@
           (.stopPropagation ev))
         (js/setTimeout
           (fn []
-            (let [effects-w-injections (apply-injections effects context)]
-              (when DEBUG
-                (js/console.groupCollapsed this)
-                (js/console.info :event ev))
-              (doseq [effect effects-w-injections]
-                (try
-                  (do-effect effect)
-                  (catch :default e
-                    (js/console.error
-                      "Error in effect handler"
-                      {:effect effect}
-                      e))))
-              (when DEBUG
-                (js/console.groupEnd))))))))
+            (when DEBUG
+              (js/console.groupCollapsed this)
+              (js/console.info :event ev))
+            (doseq [effect effects]
+              (try
+                (do-effect effect)
+                (catch :default e
+                  (js/console.error
+                    "Error in effect handler"
+                    {:effect effect}
+                    e))))
+            (when DEBUG
+              (js/console.groupEnd)))))))
   
   IEquiv
   (-equiv [^js this ^js other]
