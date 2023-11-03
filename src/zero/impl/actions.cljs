@@ -12,12 +12,26 @@
     super();
     this.props = props;
     this.effects = effects;
-    return new Proxy(this, {apply: (target, thisArg, args) => zero.impl.actions.perform_BANG_(target, args[0])});
+    return new Proxy(this, {apply: (target, thisArg, args) => {
+      if(args[0] instanceof Event) {
+        zero.impl.actions.perform_with_event_BANG_(target, args[0]);
+      } else {
+        zero.impl.actions.perform_BANG_(target, args[0]);
+      }
+    }});
   }
 })"))
 
 (defprotocol IAction
-  (perform! [this ^js/Event ev]))
+  (perform! [act context]))
+
+(defn perform-with-event! [^Action act ^js/Event ev]
+  (let [props (.-props act)]
+    (when (:prevent-default? props)
+      (.preventDefault ev))
+    (when (:stop-propagation? props)
+      (.stopPropagation ev))
+    (perform! act {:event ev :target (.-target ev)})))
 
 (def ^:private !effects (atom {}))
 
@@ -30,29 +44,23 @@
 
 (extend-type Action
   IAction
-  (perform! [^js this ^js/Event ev]
-    (let [props (.-props this)
-          effects (apply-injections (.-effects this) {:event ev})]
-      (when (or (not (:skip-bubbled? props)) (= (.-currentTarget ev) (.-target ev)))
-        (when (:prevent-default? props)
-          (.preventDefault ev))
-        (when (:stop-propagation? props)
-          (.stopPropagation ev))
-        (js/setTimeout
-          (fn []
-            (when DEBUG
-              (js/console.groupCollapsed this)
-              (js/console.info :event ev))
-            (doseq [effect effects]
-              (try
-                (do-effect effect)
-                (catch :default e
-                  (js/console.error
-                    "Error in effect handler"
-                    {:effect effect}
-                    e))))
-            (when DEBUG
-              (js/console.groupEnd)))))))
+  (perform! [^Action this context]
+    (let [effects (apply-injections (.-effects this) context)]
+      (js/setTimeout
+        (fn []
+          (when DEBUG
+            (js/console.groupCollapsed this)
+            (js/console.info :context context))
+          (doseq [effect effects]
+            (try
+              (do-effect effect)
+              (catch :default e
+                (js/console.error
+                  "Error in effect handler"
+                  {:effect effect}
+                  e))))
+          (when DEBUG
+            (js/console.groupEnd))))))
   
   IEquiv
   (-equiv [^js this ^js other]
@@ -74,16 +82,3 @@
 
 (defn reg-effect [effect-key f]
   (swap! !effects assoc effect-key f))
-
-(reg-effect
-  :cond
-  (fn [& cases]
-    (when-let [[_ & effects] (first (filter first cases))]
-      (doseq [effect effects]
-        (do-effect effect)))))
-
-(reg-effect
-  :effects
-  (fn [effects]
-    (doseq [effect effects]
-      (do-effect effect))))

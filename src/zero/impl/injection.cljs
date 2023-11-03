@@ -4,11 +4,8 @@
 
 (def ^:private !injectors (atom {}))
 
-(defprotocol IInjection
-  (injected [o context !cache]))
-
 (deftype Injection [injector-key args]
-  IInjection
+  Object
   (injected [this context !cache]
     (let [cache-key [injector-key args]]
       (if (contains? @!cache cache-key)
@@ -16,7 +13,7 @@
         (try
           (let [injector (or (get @!injectors injector-key)
                            (throw (ex-info "No injector registered for key" {:injector-key injector-key})))
-                r (apply injector context (postwalk #(if (instance? Injection %) (injected % context !cache) %) args))]
+                r (apply injector context (postwalk #(if (instance? Injection %) (.injected % context !cache) %) args))]
             (swap! !cache assoc cache-key r)
             r)
           (catch :default e
@@ -26,6 +23,7 @@
   IEquiv
   (-equiv [_ ^Injection other]
     (and
+      (instance? Injection other)
       (= injector-key (.-injector-key other))
       (= args (.-args other))))
 
@@ -45,7 +43,7 @@
       (postwalk
         (fn [form]
           (if (instance? Injection form)
-            (injected form context !cache)
+            (.injected form context !cache)
             form))
         x))))
 
