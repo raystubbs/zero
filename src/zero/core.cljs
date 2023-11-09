@@ -24,7 +24,7 @@ printed, etc. as data.
   (let [[props effects] (if (map? (first things))
                           [(first things) (rest things)]
                           [{} things])]
-    (zero.impl.actions/Action. props effects)))
+    (zero.impl.actions/Action. props (filterv some? effects))))
 
 (defn reg-effect "
 Register one or more effects.
@@ -156,5 +156,6 @@ keyword.
 "[kw]
   (c/component-name kw))
 
-(defn do-effect [effect]
-  (act/do-effect effect))
+(defn do-effects [& effects]
+  (doseq [effect effects]
+    (act/do-effect effect)))

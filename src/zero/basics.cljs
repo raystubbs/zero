@@ -7,12 +7,12 @@
   (fn [& cases]
     (when-let [[_ & effects] (first (filter first cases))]
       (doseq [effect effects]
-        (z/do-effect effect))))
+        (z/do-effects effect))))
 
   :effects
   (fn [effects]
     (doseq [effect effects]
-      (z/do-effect effect))))
+      (z/do-effects effect))))
 
 (z/reg-injector
   :context

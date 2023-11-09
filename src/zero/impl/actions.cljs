@@ -31,15 +31,17 @@
       (.preventDefault ev))
     (when (:stop-propagation? props)
       (.stopPropagation ev))
-    (perform! act {:event ev :target (.-target ev)})))
+    (perform! act
+      {:event ev
+       :target (.-target ev)
+       :root (.getRootNode (.-currentTarget ev))
+       :current (.-currentTarget ev)})))
 
 (def ^:private !effects (atom {}))
 
 (defn do-effect [[effect-key & args :as effect]]
   (let [effect-fn (or (get @!effects effect-key)
                     (throw (ex-info "No effect registered for key" {:effect-key effect-key})))]
-    (when DEBUG
-      (js/console.info :effect effect))
     (apply effect-fn args)))
 
 (extend-type Action
@@ -48,9 +50,6 @@
     (let [effects (apply-injections (.-effects this) context)]
       (js/setTimeout
         (fn []
-          (when DEBUG
-            (js/console.groupCollapsed this)
-            (js/console.info :context context))
           (doseq [effect effects]
             (try
               (do-effect effect)
@@ -60,7 +59,7 @@
                   {:effect effect}
                   e))))
           (when DEBUG
-            (js/console.groupEnd))))))
+            (js/console.debug this))))))
   
   IEquiv
   (-equiv [^js this ^js other]
