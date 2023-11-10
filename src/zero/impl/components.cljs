@@ -548,12 +548,12 @@ one sequence.
                  (swap! !dirty disj this)
                  (set! (.-instances static-state) (disj (.-instances static-state) this))
                  (set! (.-connected instance-state) false)
-                 (doseq [^js/Node child-dom (-> shadow .-childNodes array-seq)]
+                 (doseq [^js/Node child-dom (-> shadow .-childNodes js/Array.from)]
                    (cleanup-dom child-dom (.-binds instance-state))
                    (.remove child-dom))
                  (assert (= {} @(.-binds instance-state)))))
              :configurable true}
-         
+
          :attributeChangedCallback
          #js{:value
              (fn [name _old-val new-val]

@@ -47,7 +47,8 @@
 (extend-type Action
   IAction
   (perform! [^Action this context]
-    (let [effects (apply-injections (.-effects this) context)]
+    (let [effects (apply-injections (.-effects this) context)
+          props (.-props this)]
       (js/setTimeout
         (fn []
           (doseq [effect effects]
@@ -58,7 +59,7 @@
                   "Error in effect handler"
                   {:effect effect}
                   e))))
-          (when DEBUG
+          (when (and (:log? props) DEBUG)
             (js/console.debug this))))))
   
   IEquiv
