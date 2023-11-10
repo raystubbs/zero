@@ -48,19 +48,26 @@
   IAction
   (perform! [^Action this context]
     (let [effects (apply-injections (.-effects this) context)
-          props (.-props this)]
+          {:keys [log?]} (.-props this)
+          should-log? (and DEBUG log?)]
       (js/setTimeout
         (fn []
-          (doseq [effect effects]
-            (try
-              (do-effect effect)
-              (catch :default e
-                (js/console.error
-                  "Error in effect handler"
-                  {:effect effect}
-                  e))))
-          (when (and (:log? props) DEBUG)
-            (js/console.debug this))))))
+          (when should-log?
+            (js/console.groupCollapsed this)
+            (js/console.info :context context))
+          (let [!errors (atom [])]
+            (doseq [effect effects]
+              (try
+                (do-effect effect)
+                (when should-log?
+                  (js/console.info :effect effect))
+                (catch :default e
+                  (js/console.error :effect effect e)
+                  (swap! !errors conj e))))
+            (when should-log?
+              (js/console.groupEnd)
+              (doseq [error @!errors]
+                (js/console.error error))))))))
   
   IEquiv
   (-equiv [^js this ^js other]
