@@ -1,6 +1,7 @@
 (ns zero.impl.components
   (:require
    [zero.impl.base :as base]
+   [zero.config :as config]
    [clojure.string :as str]
    [goog.object :as gobj]
    [goog :refer [DEBUG]]))
@@ -226,7 +227,7 @@ one sequence.
 
 (defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props tag]
   (let [diff (diff-props (gobj/get dom PROPS-SYM) props)]
-    
+
     ;; This has to happen whether or not the actual
     ;; `:z/css` prop has changed, since the `tag` might
     ;; have changed, and we have no way of checking that.
@@ -238,7 +239,7 @@ one sequence.
           (nil? css-prop) #js[implicit-css]
           (coll? css-prop) (->> css-prop (map ->stylesheet-object) (into [implicit-css]) to-array)
           :else #js[implicit-css (->stylesheet-object css-prop)])))
-    
+
     (when-not (empty? diff)
       (when-let [listeners-diff (diff :z/on)]
         (patch-listeners dom listeners-diff))
@@ -400,9 +401,11 @@ one sequence.
       (cond
         (vector? vnode)
         (let [[tag props body] (preproc-vnode vnode)
-              child-dom (take-el-dom tag props)]
-          (patch-props child-dom !binds props)
-          (patch-children child-dom !binds body)
+              child-dom (take-el-dom tag props)
+              old-props (gobj/get child-dom PROPS-SYM)]
+          (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
+            (patch-props child-dom !binds props)
+            (patch-children child-dom !binds body))
           (mark-and-inject child-dom)
           
           ;; keep track of <link> elements so we can make them
@@ -425,8 +428,10 @@ one sequence.
 (defn- render [^js/ShadowRoot dom ^js/ElementInternals internals !binds vnode]
   (cond
     (and (vector? vnode) (contains? ROOT-TAGS (first vnode)))
-    (let [[tag props body] (preproc-vnode vnode)]
-      (patch-root-props dom internals props tag)
+    (let [[tag props body] (preproc-vnode vnode)
+          old-props (gobj/get dom PROPS-SYM)]
+      (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
+        (patch-root-props dom internals props tag))
       (patch-children dom !binds body))
 
     (seq? vnode)
