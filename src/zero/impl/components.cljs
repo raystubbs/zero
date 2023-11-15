@@ -122,12 +122,12 @@ one sequence.
     (let [type-str (name type)]
       (when old-listener
         (let [abort-controllers (gobj/get dom LISTENER-ABORT-CONTROLLERS-SYM)
-              abort-controller (get abort-controllers old-listener)]
+              abort-controller (get abort-controllers [type old-listener])]
           (.abort abort-controller)
           (gobj/set dom LISTENER-ABORT-CONTROLLERS-SYM (dissoc abort-controllers old-listener))))
       (when new-listener
         (let [abort-controller (js/AbortController.)
-              abort-controllers (assoc (gobj/get dom LISTENER-ABORT-CONTROLLERS-SYM) new-listener abort-controller)]
+              abort-controllers (assoc (gobj/get dom LISTENER-ABORT-CONTROLLERS-SYM) [type new-listener] abort-controller)]
           (gobj/set dom LISTENER-ABORT-CONTROLLERS-SYM abort-controllers)
           (.addEventListener dom type-str new-listener #js{:signal (.-signal abort-controller)}))))))
 
