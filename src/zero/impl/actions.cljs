@@ -37,7 +37,8 @@
        :root (.getRootNode (.-currentTarget ev))
        :current (.-currentTarget ev)})))
 
-(def ^:private !effects (atom {}))
+(defonce ^:private !effects (atom {}))
+(defonce ^:private !throttles (atom {}))
 
 (defn do-effect [[effect-key & args :as effect]]
   (let [effect-fn (or (get @!effects effect-key)
@@ -47,27 +48,55 @@
 (extend-type Action
   IAction
   (perform! [^Action this context]
-    (let [effects (apply-injections (.-effects this) context)
-          {:keys [log?]} (.-props this)
-          should-log? (and DEBUG log?)]
-      (js/setTimeout
-        (fn []
-          (when should-log?
-            (js/console.groupCollapsed this)
-            (js/console.info :context context))
-          (let [!errors (atom [])]
-            (doseq [effect effects]
-              (try
-                (do-effect effect)
-                (when should-log?
-                  (js/console.info :effect effect))
-                (catch :default e
-                  (js/console.error :effect effect e)
-                  (swap! !errors conj e))))
-            (when should-log?
-              (js/console.groupEnd)
-              (doseq [error @!errors]
-                (js/console.error error))))))))
+    (let [{:keys [log? throttle debounce]} (.-props this)
+          should-log? (and DEBUG log?)
+          actually-perform! (fn actually-perform! []
+                              (when should-log?
+                                (js/console.groupCollapsed this)
+                                (js/console.info :context context))
+                              (let [!errors (atom [])]
+                                (doseq [effect (apply-injections (.-effects this) context)]
+                                  (try
+                                    (do-effect effect)
+                                    (when should-log?
+                                      (js/console.info :effect effect))
+                                    (catch :default e
+                                      (js/console.error :effect effect e)
+                                      (swap! !errors conj e))))
+                                (when should-log?
+                                  (js/console.groupEnd)
+                                  (doseq [error @!errors]
+                                    (js/console.error error)))))]
+      (cond
+        (number? throttle)
+        (case (get @!throttles this)
+          :called-once (swap! !throttles assoc this :called-more-than-once)
+          :called-more-than-once nil
+
+          (do
+            (js/setTimeout actually-perform!)
+            (swap! !throttles assoc this :called-once)
+            (js/setTimeout
+              (fn throttle-trailing []
+                (swap! !throttles dissoc this)
+                (actually-perform!))
+              throttle)))
+
+        (number? debounce)
+        (case (get @!throttles this)
+          :debounced nil
+
+          (do
+            (swap! !throttles assoc this :debounced)
+            (js/setTimeout
+              (fn debounce-trailing []
+                (swap! !throttles dissoc this)
+                (actually-perform!))
+              debounce)))
+
+        :else
+        (js/setTimeout actually-perform!))
+      nil))
   
   IEquiv
   (-equiv [^js this ^js other]

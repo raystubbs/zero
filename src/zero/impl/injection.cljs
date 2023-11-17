@@ -2,7 +2,7 @@
   (:require
    [clojure.walk :refer [postwalk]]))
 
-(def ^:private !injectors (atom {}))
+(defonce ^:private !injectors (atom {}))
 
 (deftype Injection [injector-key args]
   Object
