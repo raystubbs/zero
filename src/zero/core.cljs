@@ -156,6 +156,6 @@ keyword.
 "[kw]
   (c/component-name kw))
 
-(defn do-effects [& effects]
+(defn do-effects! [& effects]
   (doseq [effect effects]
-    (act/do-effect effect)))
+    (act/do-effect! effect)))

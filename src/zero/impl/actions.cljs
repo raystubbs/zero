@@ -3,7 +3,8 @@
     [clojure.string :as str]
     [zero.impl.injection :refer [apply-injections]]
     [goog.object :as gobj]
-    [goog :refer [DEBUG]]))
+    [goog :refer [DEBUG]]
+    [zero.config :as config]))
 
 (defonce ^js Action (js* "
 (class extends Function {
@@ -32,15 +33,17 @@
     (when (:stop-propagation? props)
       (.stopPropagation ev))
     (perform! act
-      {:event ev
+      {:shape :z/event-context
+       :event ev
+       :data (config/harvest-event ev)
        :target (.-target ev)
        :root (.getRootNode (.-currentTarget ev))
        :current (.-currentTarget ev)})))
 
 (defonce ^:private !effects (atom {}))
-(defonce ^:private !throttles (atom {}))
+(defonce ^:private THROTTLE-STATE (js/Symbol "zThrottleState"))
 
-(defn do-effect [[effect-key & args :as effect]]
+(defn do-effect! [[effect-key & args :as effect]]
   (let [effect-fn (or (get @!effects effect-key)
                     (throw (ex-info "No effect registered for key" {:effect-key effect-key})))]
     (apply effect-fn args)))
@@ -48,7 +51,7 @@
 (extend-type Action
   IAction
   (perform! [^Action this context]
-    (let [{:keys [log? throttle debounce]} (.-props this)
+    (let [{:keys [log? throttle throttle-strategy]} (.-props this)
           should-log? (and DEBUG log?)
           actually-perform! (fn actually-perform! []
                               (when should-log?
@@ -57,7 +60,7 @@
                               (let [!errors (atom [])]
                                 (doseq [effect (apply-injections (.-effects this) context)]
                                   (try
-                                    (do-effect effect)
+                                    (do-effect! effect)
                                     (when should-log?
                                       (js/console.info :effect effect))
                                     (catch :default e
@@ -69,30 +72,31 @@
                                     (js/console.error error)))))]
       (cond
         (number? throttle)
-        (case (get @!throttles this)
-          :called-once (swap! !throttles assoc this :called-more-than-once)
-          :called-more-than-once nil
-
+        (cond
+          (nil? (gobj/get this THROTTLE-STATE))
           (do
-            (js/setTimeout actually-perform!)
-            (swap! !throttles assoc this :called-once)
-            (js/setTimeout
-              (fn throttle-trailing []
-                (swap! !throttles dissoc this)
-                (actually-perform!))
-              throttle)))
+            (case (or throttle-strategy :default)
+              :default (js/setTimeout actually-perform!)
+              :debounce nil)
 
-        (number? debounce)
-        (case (get @!throttles this)
-          :debounced nil
+            (let [interval-id
+                  (js/setInterval
+                    (fn []
+                      (let [{:keys [hit? interval-id] :as state} (gobj/get this THROTTLE-STATE)]
+                        (cond
+                          hit?
+                          (do
+                            (js/setTimeout actually-perform!)
+                            (gobj/set this THROTTLE-STATE (assoc state :hit? false)))
 
-          (do
-            (swap! !throttles assoc this :debounced)
-            (js/setTimeout
-              (fn debounce-trailing []
-                (swap! !throttles dissoc this)
-                (actually-perform!))
-              debounce)))
+                          :else
+                          (do
+                            (gobj/set this THROTTLE-STATE nil)
+                            (js/clearInterval interval-id))))))]
+              (gobj/set this THROTTLE-STATE {:hit? (= throttle-strategy :debounce) :interval-id interval-id})))
+
+          :else
+          (gobj/set this THROTTLE-STATE (assoc (gobj/get this THROTTLE-STATE) :hit? true)))
 
         :else
         (js/setTimeout actually-perform!))

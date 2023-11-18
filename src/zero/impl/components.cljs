@@ -103,14 +103,8 @@ one sequence.
 (defonce ^:private HTML-NS "http://www.w3.org/1999/xhtml")
 (defonce ^:private SVG-NS "http://www.w3.org/2000/svg")
 (defonce ^:private PRIVATE-SYM (js/Symbol "zPrivate"))
+(defonce ^:private HOST-CSS-SYM (js/Symbol "zHostCss"))
 (def ^:private DEFAULT-CSS (css ":host { display: contents; }"))
-(def ^:private ROOT-TAGS
-  {:z/root              {:css DEFAULT-CSS}
-   :z/root:contents     {:css DEFAULT-CSS}
-   :z/root:block        {:css (css ":host { display: block; }")}
-   :z/root:inline-block {:css (css ":host { display: inline-block; }")}
-   :z/root:inline       {:css (css ":host { display: inline; }")}
-   :z/root:inline-flex  {:css (css ":host { display: inline-flex; }")}})
 
 (defn- default-ns [tag]
   (case tag
@@ -225,40 +219,43 @@ one sequence.
                 (assoc diff key inner-diff)))))
         $ [:z/style :z/on :z/aria]))))
 
-(defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props tag]
-  (let [diff (diff-props (gobj/get dom PROPS-SYM) props)]
-
-    ;; This has to happen whether or not the actual
-    ;; `:z/css` prop has changed, since the `tag` might
-    ;; have changed, and we have no way of checking that.
-    ;; It can be optimized a bit, not sure if it's worth it.
-    (let [css-prop (get props :z/css)
-          implicit-css (get-in ROOT-TAGS [tag :css])]
-      (set! (.-adoptedStyleSheets dom)
-        (cond
-          (nil? css-prop) #js[implicit-css]
-          (coll? css-prop) (->> css-prop (map ->stylesheet-object) (into [implicit-css]) to-array)
-          :else #js[implicit-css (->stylesheet-object css-prop)])))
-
-    (when-not (empty? diff)
-      (when-let [listeners-diff (diff :z/on)]
-        (patch-listeners dom listeners-diff))
-      ;; TODO: element internals (i.e aria, etc.)
-      (gobj/set dom PROPS-SYM props))))
-
 (defn- ->css-value [x]
   (cond
     (or (keyword? x) (symbol? x))
     (name x)
-    
+
     (vector? x)
     (str/join " " (map ->css-value x))
-    
+
     (seq? x)
     (str/join ", " (map ->css-value x))
-    
+
     :else
     (str x)))
+
+(defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props]
+  (let [old-props (gobj/get dom PROPS-SYM)
+        diff (diff-props old-props props)
+        ^js host-css (or (gobj/get dom HOST-CSS-SYM)
+                       (let [x (js/CSSStyleSheet.)]
+                         (.replaceSync x ":host {}")
+                         (gobj/set dom HOST-CSS-SYM x)
+                         x))]
+    (when-not (empty? diff)
+      (when-let [style-diff (diff :z/style)]
+        (let [style-obj (-> host-css .-cssRules (.item 0) .-style)]
+          (doseq [[k [_ new-val]] style-diff]
+            (if-not new-val
+              (.removeProperty style-obj (name k))
+              (.setProperty style-obj (name k) (->css-value new-val))))))
+      (when-let [[_ css-prop] (get diff :z/css)]
+        (set! (.-adoptedStyleSheets dom) (->> (conj css-prop host-css) (mapv ->stylesheet-object) to-array)))
+      (when-let [listeners-diff (diff :z/on)]
+        (patch-listeners dom listeners-diff))
+
+      ;; TODO: element internals (i.e aria, etc.)
+      )
+    (gobj/set dom PROPS-SYM props)))
 
 (defn- patch-props [^js/Node dom !binds props]
   (let [diff (diff-props (or (gobj/get dom PROPS-SYM) {}) props)]
@@ -426,19 +423,21 @@ one sequence.
       (gobj/set dom-child MARK-SYM false))))
 
 (defn- render [^js/ShadowRoot dom ^js/ElementInternals internals !binds vnode]
-  (cond
-    (and (vector? vnode) (contains? ROOT-TAGS (first vnode)))
-    (let [[tag props body] (preproc-vnode vnode)
-          old-props (gobj/get dom PROPS-SYM)]
-      (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
-        (patch-root-props dom internals props tag))
-      (patch-children dom !binds body))
+  (let [default-css (-> dom .-host .-constructor ^js (gobj/get PRIVATE-SYM) .-default-css)
+        old-props (gobj/get dom PROPS-SYM)
+        [props body] (cond
+                       (and (vector? vnode) (= (first vnode) :root>))
+                       (rest (preproc-vnode vnode))
 
-    (seq? vnode)
-    (patch-children dom !binds vnode)
+                       (seq? vnode)
+                       [{} vnode]
 
-    :else
-    (patch-children dom !binds (list vnode))))
+                       :else
+                       [{} (list vnode)])]
+    (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
+      (patch-root-props dom internals
+        (update props :z/css #(cond (coll? %) (into default-css %) (some? %) (conj default-css %) :else default-css)))
+      (patch-children dom !binds body))))
 
 (defn- normalize-prop-spec [prop-name prop-spec]
   (case prop-spec
@@ -501,7 +500,7 @@ one sequence.
   (when-not @!render-frame-id
     (reset! !render-frame-id (js/requestAnimationFrame do-render))))
 
-(defn- patch-el-class [class {:keys [props view focus name]}]
+(defn- patch-el-class [class {:keys [props view focus name inherit-doc-css?]}]
   (let [^js proto (.-prototype class)
         ^js static-state (gobj/get class PRIVATE-SYM)
         props-map (cond
@@ -522,11 +521,19 @@ one sequence.
                                (let [normalized-spec (normalize-prop-spec prop-name prop-spec)]
                                  (when-let [field-name (:field normalized-spec)]
                                    [field-name normalized-spec]))))
-                           (into {}))]
+                           (into {}))
+        default-css (cond-> [DEFAULT-CSS]
+                      inherit-doc-css?
+                      (into (->> (js/document.querySelectorAll "link[rel=\"stylesheet\"]")
+                              .values es6-iterator-seq
+                              (map (fn [^js link-dom] (.getAttribute link-dom "href")))
+                              (remove str/blank?)
+                              (mapv ->stylesheet-object))))]
     (set! (.-version static-state) (or (some-> static-state .-version inc) 0))
     (set! (.-view static-state) view)
     (set! (.-focus static-state) focus)
     (set! (.-name static-state) name)
+    (set! (.-default-css static-state) default-css)
     (swap! !class->fields-index dissoc class)
     (js/Object.defineProperty
      class "observedAttributes"
@@ -598,6 +605,18 @@ one sequence.
                 (when (.-connected instance-state)
                   (request-render (js* "this")))))
             :configurable true}))
+    (js/Object.defineProperty
+      proto
+      "elementName"
+      #js{:value (kw->el-name name)
+          :writable false
+          :configurable true})
+    (js/Object.defineProperty
+      proto
+      "componentName"
+      #js{:value name
+          :writable false
+          :configurable true})
     (doseq [instance (.-instances static-state)]
       (request-render instance))))
 
@@ -627,11 +646,6 @@ one sequence.
 
 (defn component-name [k]
   (kw->el-name k))
-
-(component
-  {:name  :z/echo
-   :props #{:vdom}
-   :view  (fn [{:keys [vdom]}] vdom)})
 
 (defonce
   _only-do-this-once
