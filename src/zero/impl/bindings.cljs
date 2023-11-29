@@ -9,7 +9,11 @@
 (defn- kill-stream [stream-ident]
   (let [{:keys [kill-ch kill-fn]} (get @!stream-states stream-ident)]
     (when kill-ch (put! kill-ch true))
-    (when (fn? kill-fn) (kill-fn)))
+    (when (fn? kill-fn)
+      (try
+        (kill-fn)
+        (catch :default e
+          (js/console.log "Error in stream cleanup fn" {:stream-key (nth stream-ident 0) :args (nth stream-ident 1)} e)))))
   (swap! !stream-states dissoc stream-ident))
 
 (defn- boot-stream [[stream-key args :as stream-ident] new-watch]
@@ -88,6 +92,11 @@
 
 (defn reg-stream [stream-key f]
   (swap! !stream-fns assoc stream-key f)
-  (doseq [[[_ args :as stream-ident] {!stream-ch :stream-ch}] (filter #(= stream-key (-> % key first)) @!stream-states)]
+  (doseq [[[_ args :as stream-ident] {!stream-ch :stream-ch kill-fn :kill-fn}] (filter #(= stream-key (-> % key first)) @!stream-states)]
+    (when (fn? kill-fn)
+      (try
+        (kill-fn)
+        (catch :default e
+          (js/console.log "Error in stream cleanup fn" {:stream-key (nth stream-ident 0) :args (nth stream-ident 1)} e))))
     (swap! !stream-states assoc-in [stream-ident :kill-fn]
       (apply f #(put! !stream-ch (if (some? %) % ::nil)) (apply-injections args {})))))
