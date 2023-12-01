@@ -18,14 +18,23 @@
              (.-metaKey event) (conj :meta))}
 
     ("input" "change")
-    (-> event .-target .-value)
+    (let [target (.-target event)]
+      (when (instance? js/HTMLInputElement target)
+        (case (.-type target)
+          "checkbox"
+          (.-checked target)
+          
+          "file"
+          (-> target .-files array-seq vec)
+          
+          (.-value target))))
 
     ("drop")
     (->> event .-dataTransfer .-items array-seq
       (mapv #(if (= "file" (.-kind %)) (.getAsFile %) (js/Blob. [(.getAsString %)] #js{:type (.-type %)}))))
 
     ;; TODO: others
-
+    
     (or
       (.-detail event)
       ;; TODO: others

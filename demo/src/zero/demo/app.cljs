@@ -1,58 +1,63 @@
 (ns zero.demo.app
   (:require
-   [zero.core :refer [<< bnd act] :as z]
-   [zero.demo.db]))
+   [clojure.string :as str]
+   [zero.core :refer [<< act bnd] :as z]
+   [zero.extras.all]))
 
-
-(defmethod z/effect :when [_ condition & effects]
-  (when (if (vector? condition) (every? identity condition) condition)
-    (doseq [effect effects]
-      (apply z/effect effect))))
-
-(defmethod z/inject :event.kb/match-key? [_ {:keys [^js event]} {:keys [key mods code]}]
-  (and
-    (or (nil? key) (= key (.-key event)))
-    (or (nil? code) (= code (.-code event)))
-    (or (not (contains? mods :ctrl)) (.-ctrlKey event))
-    (or (not (contains? mods :shift)) (.-shiftKey event))
-    (or (not (contains? mods :alt)) (.-altKey event))
-    (or (not (contains? mods :meta)) (.-metaKey event))))
-
-(defmethod z/inject :dom.input/value [_ {:keys [^js event]}]
-  (-> event .-target .-value))
-
-(defmethod z/inject :dom.input/checked? [_ {:keys [^js event]}]
-  (-> event .-target .-checked))
+(z/reg-injector
+  :event.kb/match-key?
+  (fn [{:keys [data]} {:keys [key mods code]}]
+    (and
+      (or (nil? key) (= key (:key data)))
+      (or (nil? code) (= code (:code data)))
+      (= (set (:mods data)) (set mods))))
+  
+  :dom.input/value
+  (fn [{:keys [root]} selector]
+    (-> root
+      (.querySelector
+        (cond-> selector
+          (keyword? selector)
+          (-> z/component-name (str/replace #"[.]" "\\."))))
+      .-value)))
 
 (z/component
-  :name ::todo
-  :props #{:items}
+  :name :z/app
+  :props {:items (bnd :ze.db/path [:todo-items])}
   :view (fn [{:keys [items]}]
           (let [completed-items (vec (filter :completed? items))]
-            [:z/root:block
+            [:root>
              :z/css ["/css/app.css"
                      "/node_modules/todomvc-common/base.css"
                      "/node_modules/todomvc-app-css/index.css"]
+             :z/on {:connect (act [:ze.db/patch
+                                   [{:path [:todo-items]
+                                     :value []}]])}
              [:section.todoapp
               [:header.header
                [:h1 "todos"]
                [:input.new-todo
                 :placeholder "What needs to be done?"
                 :autofocus true
-                :z/on {:keydown (act [:when (<< :event.kb/match-key? {:key "Enter"})
-                                      [:db/add-todo {:text (<< :dom.input/value)
-                                                     :completed? false
-                                                     :editing? false}]])}]]
+                :z/on {:keydown (act [:ze/cond
+                                      [(<< :event.kb/match-key? {:key "Enter"})
+                                       [:ze.db/patch
+                                        [{:path [:todo-items]
+                                          :conj {:text       (<< :dom.input/value :input)
+                                                 :completed? false
+                                                 :editing?   false}}]]]])}]]
               (when (seq items)
                 [:section.main
                  [:input#toggle-all.toggle-all
                   :type "checkbox"
-                  :z/on {:change (act [:db/replace-todos (mapv #(assoc % :completed? (<< :dom.input/checked?)) items)])}]
+                  :z/on {:change (act [:ze.db/patch
+                                       [{:path [:todo-items]
+                                         :value (mapv #(assoc % :completed? (<< :ze/ctx :data)) items)}]])}]
                  [:label {:for "toggle-all"}
                   "Mark all as complete"]
                  [:ul.todo-list
                   (map-indexed
-                    (fn [idx {:keys [text editing? completed?] :as item}]
+                    (fn [idx {:keys [text editing? completed?]}]
                       [:li
                        :z/class (cond-> []
                                   editing? (conj "editing")
@@ -64,10 +69,14 @@
                           [:input.toggle
                            :type "checkbox"
                            :checked completed?
-                           :z/on {:change (act [:db/replace-todo idx (update item :completed? not)])}]
+                           :z/on {:change (act [:ze.db/patch
+                                                [{:path [:todo-items]
+                                                  :value (update-in items [idx :completed?] not)}]])}]
                           [:label text]
                           [:button.destroy
-                           :z/on {:click (act [:db/rm-todo idx])}]])])
+                           :z/on {:click (act [:ze.db/patch
+                                               [{:path [:todo-items]
+                                                 :value (into (subvec items 0 idx) (subvec items (inc idx)))}]])}]])])
                     items)]])
               (when (seq items)
                 [:footer.footer
@@ -77,10 +86,12 @@
                   "left"]
                  (when (seq completed-items)
                    [:button.clear-completed
-                    :z/on {:click (act [:db/replace-todos (vec (remove :completed? items))])}
+                    :z/on {:click (act [:ze.db/patch
+                                        [{:path [:todo-items]
+                                          :value (vec (remove :completed? items))}]])}
                     "Clear completed"])])]
              [:footer.info
-              [:p "Double-click to edit a todo"] 
+              [:p "Double-click to edit a todo"]
               [:p
                "Created by "
                [:a {:href "http://github.com/raystubbs"}
@@ -89,8 +100,3 @@
                "Part of "
                [:a {:href "http://todomvc.com"}
                 "TodoMVC"]]]])))
-
-(z/component
- :name :z/app
- :view (fn []
-         [:z/echo :vdom [::todo :items (bnd {:default []} :db/todo-items)]]))

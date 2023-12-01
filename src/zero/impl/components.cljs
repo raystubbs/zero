@@ -446,10 +446,20 @@ one sequence.
            :prop prop-name}
     :field {:field (-> prop-name name base/cammel-case)
             :prop prop-name}
-    (when (map? prop-spec)
+    (cond
+      (satisfies? IWatchable prop-spec)
+      {:state-factory (constantly prop-spec) :prop prop-name}
+
+      (fn? prop-spec)
+      {:state-factory prop-spec :prop prop-name}
+
+      (map? prop-spec)
       (cond-> prop-spec
-        :always (assoc :prop prop-name)
-        (not (:field prop-spec)) (assoc :field (-> prop-name name base/cammel-case))))))
+        :always
+        (assoc :prop prop-name)
+
+        (not (or (:field prop-spec) (:state prop-spec) (:state-factory prop-spec)))
+        (assoc :field (-> prop-name name base/cammel-case))))))
 
 (defonce ^:private !dirty (atom #{}))
 (defonce ^:private !render-frame-id (atom nil))
@@ -508,20 +518,13 @@ one sequence.
                     (map? props) props
                     (nil? props) {}
                     :else (throw (ex-info "Props must be either a map or a set" {:props props :component name})))
-        attr->prop-spec (->> props-map
+        normalized-prop-specs (keep #(normalize-prop-spec (key %) (val %)) props-map)
+        attr->prop-spec (->> normalized-prop-specs
                           (keep
-                            (fn [[prop-name prop-spec]]
-                              (let [normalized-spec (normalize-prop-spec prop-name prop-spec)]
-                                (when-let [attr-name (:attr normalized-spec)]
-                                  [attr-name normalized-spec]))))
+                            (fn [prop-spec]
+                              (when (and (:attr prop-spec) (nil? (:state-factory prop-spec)))
+                                [(:attr prop-spec) prop-spec])))
                           (into {}))
-        field->prop-spec (->> props-map
-                           (keep
-                             (fn [[prop-name prop-spec]]
-                               (let [normalized-spec (normalize-prop-spec prop-name prop-spec)]
-                                 (when-let [field-name (:field normalized-spec)]
-                                   [field-name normalized-spec]))))
-                           (into {}))
         default-css (cond-> [DEFAULT-CSS]
                       inherit-doc-css?
                       (into (->> (js/document.querySelectorAll "link[rel=\"stylesheet\"]")
@@ -545,9 +548,30 @@ one sequence.
          #js{:value
              (fn []
                (let [^js/Node this (js* "this")
-                     ^js instance-state (gobj/get this PRIVATE-SYM)]
+                     ^js instance-state (gobj/get this PRIVATE-SYM)
+                     ^js/ShadowRoot shadow (.-shadow instance-state)]
                  (set! (.-instances static-state) (conj (.-instances static-state) this))
                  (set! (.-binds instance-state) (atom {}))
+                 (doseq [prop-spec (filter :state-factory normalized-prop-specs)]
+                   (when-not (contains? (.-props instance-state) (:prop prop-spec))
+                     (try
+                       (let [state ((:state-factory prop-spec) this)
+                             watch-key [::state-prop (:prop prop-spec) this]]
+                         (when-not (satisfies? IWatchable state)
+                           (throw (ex-info "State factory produced something not watchable" {:state state})))
+                         (add-watch state watch-key
+                           (fn [_ _ _ new-val]
+                             (set! (.-props instance-state)
+                               (assoc (.-props instance-state) (:prop prop-spec) new-val))
+                             (when (.-connected instance-state)
+                               (request-render this))))
+                         (.addEventListener shadow "disconnect"
+                           (fn []
+                             (remove-watch state watch-key)
+                             (when-let [state-cleanup (:state-cleanup prop-spec)]
+                               (state-cleanup state this)))))
+                       (catch :default e
+                         (js/console.error "Error initializing state prop" e)))))
                  (request-render this)))
              :configurable true}
          :disconnectedCallback
@@ -586,36 +610,38 @@ one sequence.
                        (when (.-connected instance-state)
                          (request-render this)))))))
              :configurable true}})
-    (doseq [[field-name prop-spec] field->prop-spec]
+    (doseq [prop-spec (filter :field normalized-prop-specs)]
       (js/Object.defineProperty
         proto
-        field-name
+        (:field prop-spec)
         #js{:get
             (fn []
               (-> (js* "this") (gobj/get PRIVATE-SYM) .-props (get (:prop prop-spec))))
             :set
-            (fn [x]
-              (let [^js instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))]
-                (cond
-                  (js* "~{} === undefined" x)
-                  (set! (.-props instance-state) (dissoc (.-props instance-state) (:prop prop-spec)))
+            (if (:state-factory prop-spec)
+              (js* "undefined")
+              (fn [x]
+                (let [^js instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))]
+                  (cond
+                    (js* "~{} === undefined" x)
+                    (set! (.-props instance-state) (dissoc (.-props instance-state) (:prop prop-spec)))
 
-                  :else
-                  (set! (.-props instance-state) (assoc (.-props instance-state) (:prop prop-spec) x)))
-                (when (.-connected instance-state)
-                  (request-render (js* "this")))))
+                    :else
+                    (set! (.-props instance-state) (assoc (.-props instance-state) (:prop prop-spec) x)))
+                  (when (.-connected instance-state)
+                    (request-render (js* "this"))))))
             :configurable true}))
     (js/Object.defineProperty
       proto
       "elementName"
-      #js{:value (kw->el-name name)
-          :writable false
+      #js{:value        (kw->el-name name)
+          :writable     false
           :configurable true})
     (js/Object.defineProperty
       proto
       "componentName"
-      #js{:value name
-          :writable false
+      #js{:value        name
+          :writable     false
           :configurable true})
     (doseq [instance (.-instances static-state)]
       (request-render instance))))
