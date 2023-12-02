@@ -280,7 +280,7 @@ one sequence.
               (cond
                 (empty? binders)
                 (do
-                  (remove-watch old-val (get @!binds [old-val :uuid]))
+                  (remove-watch old-val (get @!binds [old-val :uid]))
                   (swap! !binds dissoc old-val))
                 
                 :else
@@ -294,16 +294,16 @@ one sequence.
               (do
                 (swap! !binds update-in [new-val :binders] conj [dom k])
                 (set-prop dom k @(:current existing)))
-              (let [watch-uuid (random-uuid)
+              (let [watch-uid (gen-uid)
                     !current (atom (if (satisfies? IDeref new-val) (deref new-val) nil))
                     binders #{[dom k]}]
                 (add-watch
-                  new-val watch-uuid
+                  new-val watch-uid
                   (fn [_ _ _ x]
                     (reset! !current x)
                     (doseq [[binder-dom binder-prop] (get-in @!binds [new-val :binders])]
                       (set-prop binder-dom binder-prop x))))
-                (swap! !binds assoc new-val {:uuid watch-uuid :current !current :binders binders})
+                (swap! !binds assoc new-val {:uid watch-uid :current !current :binders binders})
                 (set-prop dom k @!current)))
 
             :else
@@ -340,7 +340,7 @@ one sequence.
           (cond
             (empty? binders)
             (do
-              (remove-watch v (get @!binds [v :uuid]))
+              (remove-watch v (get @!binds [v :uid]))
               (swap! !binds dissoc v))
             
             :else
@@ -378,15 +378,14 @@ one sequence.
                         (if match
                           (do
                             (swap! !child-doms update matcher subvec 1)
-                            match)
-                          (do
-                            (js/document.createElementNS
-                              (or
-                                (:xmlns props)
-                                (default-ns tag)
-                                (.-namespaceURI dom)
-                                HTML-NS)
-                              (kw->el-name tag))))))
+                            match) 
+                          (js/document.createElementNS
+                            (or
+                              (:xmlns props)
+                              (default-ns tag)
+                              (.-namespaceURI dom)
+                              HTML-NS)
+                            (kw->el-name tag)))))
         
         take-text-dom (fn []
                         (if-let [existing (first (get @!child-doms :text))]
