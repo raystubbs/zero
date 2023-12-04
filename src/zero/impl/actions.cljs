@@ -115,10 +115,11 @@
   IPrintWithWriter
   (-pr-writer [^js this writer _opts]
     (-write writer
-      (str (concat
-             ['act]
-             (when (seq (.-props this)) [(.-props this)])
-             (.-effects this))))))
+      (pr-str
+        (concat
+          ['act]
+          (when (seq (.-props this)) [(.-props this)])
+          (.-effects this))))))
 
 (defn reg-effect [effect-key f]
   (swap! !effects assoc effect-key f))

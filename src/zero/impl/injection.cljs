@@ -33,7 +33,7 @@
 
   IPrintWithWriter
   (-pr-writer [_ writer _opts]
-    (-write writer (str (concat ['<< injector-key] args)))))
+    (-write writer (pr-str (concat ['<< injector-key] args)))))
 
 (def ^:dynamic ^:private *context* nil)
 

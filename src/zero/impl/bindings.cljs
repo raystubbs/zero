@@ -13,7 +13,7 @@
       (try
         (kill-fn)
         (catch :default e
-          (js/console.log "Error in stream cleanup fn" {:stream-key (nth stream-ident 0) :args (nth stream-ident 1)} e)))))
+          (js/console.error "Error in stream cleanup fn" {:stream-key (nth stream-ident 0) :args (nth stream-ident 1)} e)))))
   (swap! !stream-states dissoc stream-ident))
 
 (defn- boot-stream [[stream-key args :as stream-ident] new-watch]
@@ -83,7 +83,7 @@
   IPrintWithWriter
   (-pr-writer [_this writer opts]
     (-write writer
-      (str
+      (pr-str
         (concat
           ['bnd]
           (when (seq props)
@@ -97,6 +97,6 @@
       (try
         (kill-fn)
         (catch :default e
-          (js/console.log "Error in stream cleanup fn" {:stream-key (nth stream-ident 0) :args (nth stream-ident 1)} e))))
+          (js/console.error "Error in stream cleanup fn" {:stream-key (nth stream-ident 0) :args (nth stream-ident 1)} e))))
     (swap! !stream-states assoc-in [stream-ident :kill-fn]
       (apply f #(put! !stream-ch (if (some? %) % ::nil)) (apply-injections args {})))))
