@@ -37,49 +37,125 @@
   (fn [_ path]
     (get-in @!db path)))
 
-(z/reg-injector
-  :ze.db/prefixed-patch
-  (fn [_ prefix patch]
-    (mapv
-      (fn [patch]
-        (update patch :path (partial into (vec prefix))))
-      patch)))
+(defn- super-paths [path]
+  (map #(subvec path 0 %) (range 0 (count path))))
 
-(defn- affected-paths [changed-path]
+(defn- watched-sub-paths [path]
+  (letfn [(collect-all-sub-paths [cur-path watch-node]
+            (cons
+              cur-path
+              (mapcat
+                (fn [[k sub-node]]
+                  (collect-all-sub-paths (conj cur-path k) sub-node))
+                (:sub watch-node))))]
+    (collect-all-sub-paths path
+      (if (empty? path)
+        @!db-watches
+        (get-in (:sub @!db-watches) (interpose :sub path))))))
+
+(defn- paths-affected-by-change-to [path]
   (concat
-    (map #(subvec changed-path 0 %) (range 0 (count changed-path)))
-    (letfn [(collect-all-sub-paths [cur-path watch-node]
-              (cons
-                cur-path
-                (mapcat
-                  (fn [[k sub-node]]
-                    (collect-all-sub-paths (conj cur-path k) (:sub sub-node)))
-                  watch-node)))]
-      (collect-all-sub-paths changed-path
-        (if (empty? changed-path)
-          @!db-watches
-          (get-in @!db-watches (into [:sub] (interpose :sub changed-path))))))))
+    (super-paths path)
+    (watched-sub-paths path)))
+
+(defn- apply-patch [db patch]
+  (reduce
+    (fn [[db-agg affected-paths-agg] {:keys [path fnil] :as patch-entry}]
+      (let [path (vec path)
+            orig-target-val (get-in db-agg path)
+            fnil-target-val (if (nil? orig-target-val) fnil orig-target-val)
+            
+            [new-target-val new-affected-paths]
+            (cond
+              (ifn? (:fn patch-entry))
+              [(apply (:fn patch-entry) fnil-target-val (:args patch-entry))
+               (paths-affected-by-change-to path)]
+
+              (map? (:merge patch-entry))
+              [(merge fnil-target-val (:merge patch-entry))
+               (concat
+                 (super-paths path)
+                 (mapcat #(watched-sub-paths (conj path %)) (keys (:merge patch-entry))))]
+
+              (coll? (:clear patch-entry))
+              (cond
+                (set? fnil-target-val)
+                [(apply disj fnil-target-val (:clear patch-entry))
+                 (paths-affected-by-change-to path)]
+
+                (map? fnil-target-val)
+                [(apply dissoc fnil-target-val (:clear patch-entry))
+                 (cond
+                   (seq (:clear patch-entry))
+                   (concat
+                     (super-paths path)
+                     (mapcat #(watched-sub-paths (conj path %)) (:clear patch-entry)))
+
+                   (not= orig-target-val fnil-target-val)
+                   (paths-affected-by-change-to path)
+
+                   :else
+                   nil)]
+
+                (vector? fnil-target-val)
+                (let [to-clear (set (:clear patch-entry))]
+                  [(cond
+                     (= 0 (count to-clear))
+                     fnil-target-val
+
+                     (= 1 (count to-clear))
+                     (let [idx (first to-clear)]
+                       (into (subvec fnil-target-val 0 idx) (subvec fnil-target-val (inc idx))))
+
+                     :else
+                     (->> fnil-target-val
+                       (keep-indexed
+                         (fn [idx x]
+                           (when-not (contains? to-clear idx)
+                             x)))
+                       vec))
+                   (cond
+                     (seq to-clear)
+                     (concat
+                       (super-paths path)
+                       (mapcat #(watched-sub-paths (conj path %)) to-clear))
+
+                     (not= orig-target-val fnil-target-val)
+                     (paths-affected-by-change-to path)
+
+                     :else
+                     nil)])
+
+                :else
+                [orig-target-val nil])
+
+              (some? (:conj patch-entry))
+              [(conj fnil-target-val (:conj patch-entry))
+               (paths-affected-by-change-to path)]
+
+              (coll? (:into patch-entry))
+              [(into fnil-target-val (:into patch-entry))
+               (paths-affected-by-change-to path)]
+
+              (coll? (:patch patch-entry))
+              (let [[patched-target-val affected-target-paths] (apply-patch fnil-target-val (:patch patch-entry))]
+                [patched-target-val
+                 (concat
+                   (super-paths path)
+                   (mapcat #(watched-sub-paths (into path %)) affected-target-paths))])
+
+              :else
+              [(:value patch-entry)
+               (paths-affected-by-change-to path)])]
+        [(if (empty? path)
+           new-target-val
+           (assoc-in db-agg path new-target-val))
+         (into affected-paths-agg new-affected-paths)]))
+    [db #{}]
+    patch))
 
 (defn patch! [patch]
-  (let [[new-db affected-paths]
-        (reduce
-          (fn [[db-agg affected-paths-agg] {:keys [path fnil] :as patch-entry}]
-            (let [path (vec path)
-                  orig-target-val (get-in db-agg path)
-                  fnil-target-val (if (nil? orig-target-val) fnil orig-target-val)
-                  new-target-val (cond
-                                   (ifn? (:fn patch-entry)) (apply (:fn patch-entry) fnil-target-val (:args patch-entry))
-                                   (map? (:merge patch-entry)) (merge fnil-target-val (:merge patch-entry))
-                                   (coll? (:clear patch-entry)) (apply (cond (set? fnil-target-val) disj (map? fnil-target-val) dissoc :else identity) fnil-target-val (:clear patch-entry))
-                                   (some? (:conj patch-entry)) (conj fnil-target-val (:conj patch-entry))
-                                   (coll? (:into patch-entry)) (into fnil-target-val (:into patch-entry))
-                                   :else (:value patch-entry))]
-              [(if (empty? path)
-                 new-target-val
-                 (assoc-in db-agg path new-target-val))
-               (into affected-paths-agg (affected-paths path))]))
-          [@!db #{}]
-          patch)]
+  (let [[new-db affected-paths] (apply-patch @!db patch)]
     (reset! !db new-db)
     (doseq [path affected-paths
             rx (:rxs (get-in @!db-watches (if (empty? path) [] (into [:sub] (interpose :sub path)))))]

@@ -422,7 +422,8 @@ one sequence.
       (gobj/set dom-child MARK-SYM false))))
 
 (defn- render [^js/ShadowRoot dom ^js/ElementInternals internals !instance-state vnode]
-  (let [default-css (-> dom .-host .-constructor ^js (gobj/get PRIVATE-SYM) .-default-css)
+  (let [!static-state (-> dom .-host .-constructor (gobj/get PRIVATE-SYM))
+        default-css (:default-css @!static-state)
         old-props (gobj/get dom PROPS-SYM)
         [props body] (cond
                        (and (vector? vnode) (= (first vnode) :root>))
@@ -522,6 +523,30 @@ one sequence.
                               (when (and (:attr prop-spec) (nil? (:state-factory prop-spec)))
                                 [(:attr prop-spec) prop-spec])))
                           (into {}))
+        state-prop-specs (filter :state-factory normalized-prop-specs)
+        init-state-props (fn [^js/Node instance]
+                           (let [!instance-state (gobj/get instance PRIVATE-SYM)]
+                             (doseq [prop-spec state-prop-specs]
+                               (when-not (contains? (:props @!instance-state) (:prop prop-spec))
+                                 (try
+                                   (let [state ((:state-factory prop-spec) instance)
+                                         watch-key [::state-prop (:prop prop-spec) instance]]
+                                     (when-not (satisfies? IWatchable state)
+                                       (throw (ex-info "State factory produced something not watchable" {:state state :component name})))
+                                     (when (satisfies? IDeref state)
+                                       (swap! !instance-state update :props assoc (:prop prop-spec) @state))
+                                     (add-watch state watch-key
+                                       (fn [_ _ _ new-val]
+                                         (swap! !instance-state assoc-in [:props (:prop prop-spec)] new-val)
+                                         (when (:connected @!instance-state)
+                                           (request-render instance))))
+                                     (.addEventListener (:shadow @!instance-state) "disconnect"
+                                       (fn []
+                                         (remove-watch state watch-key)
+                                         (when-let [state-cleanup (:state-cleanup prop-spec)]
+                                           (state-cleanup state instance)))))
+                                   (catch :default e
+                                     (js/console.error "Error initializing state prop" e)))))))
         default-css (cond-> [DEFAULT-CSS]
                       inherit-doc-css?
                       (into (->> (js/document.querySelectorAll "link[rel=\"stylesheet\"]")
@@ -546,29 +571,10 @@ one sequence.
           #js{:value
               (fn []
                 (let [^js/Node this (js* "this")
-                      !instance-state (gobj/get this PRIVATE-SYM)
-                      ^js/ShadowRoot shadow (:shadow @!instance-state)]
+                      !instance-state (gobj/get this PRIVATE-SYM)]
                   (swap! !static-state update :instances conj this)
                   (swap! !instance-state assoc :binds {})
-                  (doseq [prop-spec (filter :state-factory normalized-prop-specs)]
-                    (when-not (contains? (:props @!instance-state) (:prop prop-spec))
-                      (try
-                        (let [state ((:state-factory prop-spec) this)
-                              watch-key [::state-prop (:prop prop-spec) this]]
-                          (when-not (satisfies? IWatchable state)
-                            (throw (ex-info "State factory produced something not watchable" {:state state})))
-                          (add-watch state watch-key
-                            (fn [_ _ _ new-val]
-                              (swap! !instance-state assoc-in [:props (:prop prop-spec)] new-val)
-                              (when (:connected @!instance-state)
-                                (request-render this))))
-                          (.addEventListener shadow "disconnect"
-                            (fn []
-                              (remove-watch state watch-key)
-                              (when-let [state-cleanup (:state-cleanup prop-spec)]
-                                (state-cleanup state this)))))
-                        (catch :default e
-                          (js/console.error "Error initializing state prop" e)))))
+                  (init-state-props this)
                   (request-render this)))
               :configurable true}
           :disconnectedCallback
@@ -639,6 +645,7 @@ one sequence.
           :writable     false
           :configurable true})
     (doseq [instance (:instances @!static-state)]
+      (init-state-props instance)
       (request-render instance))))
 
 (defn component [{:keys [name props view focus] :as things}]
@@ -654,7 +661,7 @@ one sequence.
         (gobj/set new-class PRIVATE-SYM (atom {:instances #{}}))
         (js/Object.defineProperty (.-prototype new-class) "init"
           #js{:value (fn []
-                       (let [this (js* "this")]
+                       (let [^js this (js* "this")]
                          (gobj/set this PRIVATE-SYM
                            (atom
                              {:shadow (.attachShadow this #js{:mode "open" :delegatesFocus (= focus :delegate)})
