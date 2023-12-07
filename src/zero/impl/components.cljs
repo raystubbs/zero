@@ -98,6 +98,7 @@ one sequence.
   (doto (js/CSSStyleSheet.) (.replaceSync s)))
 
 (defonce ^:private PROPS-SYM (js/Symbol "zProps"))
+(defonce ^:private CHILDREN-SYM (js/Symbol "zChildren"))
 (defonce ^:private LISTENER-ABORT-CONTROLLERS-SYM (js/Symbol "zListenerAbortControllers"))
 (defonce ^:private MARK-SYM (js/Symbol "zMark"))
 (defonce ^:private HTML-NS "http://www.w3.org/1999/xhtml")
@@ -198,9 +199,10 @@ one sequence.
     {} (set (concat (keys map-a) (keys map-b)))))
 
 (defn diff-props [old-props new-props]
-  (let [all-keys (set (concat (keys new-props) (keys old-props)))]
+  (let [all-keys (merge old-props new-props)]
     (as-> all-keys $
-      (disj $ :z/style :z/on)
+      (dissoc $ :z/style :z/on)
+      (keys $)
       (reduce
         (fn [diff key]
           (let [new-val (get new-props key)
@@ -319,9 +321,12 @@ one sequence.
         
         ;; patch classes
         (when-let [[_ class] (diff :z/class)]
+          ;; setting className is faster than .setAttribute, but there
+          ;; doesn't seem to be a way to remove the attribute this way,
+          ;; so use .removeAttribute to remove it
           (if (nil? class)
             (.removeAttribute dom "class")
-            (.setAttribute dom "class" (cond->> class (sequential? class) flatten :always (str/join " ")))))
+            (set! (.-className dom) (str/join " " class))))
         (gobj/set dom PROPS-SYM props)))))
 
 (defn- kw->el-name [tag]
@@ -345,32 +350,83 @@ one sequence.
             
             :else
             (swap! !instance-state assoc-in [:binds v :binders] binders))))))
-  (doseq [child-dom (-> dom .-childNodes array-seq)]
+  (doseq [child-dom (gobj/get dom CHILDREN-SYM)]
     (cleanup-dom child-dom !instance-state))
   (when (and DEBUG (= (.-nodeName dom) "LINK"))
     (swap! !css-links disj dom)))
 
+(defn- calc-child-dom-changes [source-dom-seq target-dom-seq inserted]
+  (cond
+    (empty? source-dom-seq)
+    (if (seq target-dom-seq)
+      [{:op :insert :doms target-dom-seq}]
+      [])
+
+    (empty? target-dom-seq)
+    [{:op :remove :doms (remove inserted source-dom-seq)}]
+
+    (= (first source-dom-seq) (first target-dom-seq))
+    (let [same-count (->> (map vector source-dom-seq target-dom-seq)
+                       (take-while (fn [[s t]] (= s t)))
+                       count)
+          remaining-source-doms (drop same-count source-dom-seq)
+          remaining-target-doms (drop same-count target-dom-seq)]
+      (into
+        (if (or (seq remaining-source-doms) (seq remaining-target-doms))
+          [{:op :skip :count same-count}]
+          [])
+        (calc-child-dom-changes remaining-source-doms remaining-target-doms inserted)))
+
+    (contains? inserted (first source-dom-seq))
+    (calc-child-dom-changes (drop-while inserted source-dom-seq) target-dom-seq inserted)
+
+    :else
+    (let [not-same-count (->> (map vector source-dom-seq target-dom-seq)
+                           (take-while (fn [[s t]] (not= s t)))
+                           count)
+          [to-insert remaining] (split-at not-same-count target-dom-seq)]
+      (into [{:op :insert :doms to-insert}]
+        (calc-child-dom-changes source-dom-seq remaining (into inserted to-insert))))))
+
+(defn- apply-dom-changes [^js/Node dom ^js/Node start-child changes !instance-state]
+  (let [!cursor (atom start-child)]
+    (doseq [{:keys [op] :as change} changes]
+      (case op
+        :skip
+        (dotimes [_ (:count change)]
+          (swap! !cursor #(some-> % .-nextSibling)))
+
+        :insert
+        (cond
+          (nil? @!cursor)
+          (do
+            (.apply (.-append dom) dom (to-array (:doms change)))
+            (reset! !cursor (.-lastChild dom)))
+
+          (.-before @!cursor)
+          (do
+            (.apply (.-before @!cursor) @!cursor (to-array (:doms change))))
+
+          :else
+          (doseq [dom-to-insert (:doms change)]
+            (.insertBefore @!cursor dom-to-insert)))
+
+        :remove
+        (doseq [dom-to-remove (:doms change)]
+          (.removeChild dom dom-to-remove)
+          (cleanup-dom dom-to-remove !instance-state))))))
+
 (defn- patch-children [^js/Node dom !instance-state children]
-  (let [!child-doms (atom
+  (let [old-child-doms (or (gobj/get dom CHILDREN-SYM) [])
+
+        !child-doms (atom
                      (group-by
                       (fn [child-dom]
                         (if (-> child-dom .-nodeType (= js/Node.TEXT_NODE))
                           :text
                           (let [props (gobj/get child-dom PROPS-SYM)]
                             [(:z/sel props) (:z/key props)])))
-                      (-> dom .-childNodes array-seq)))
-        !dom-cursor (atom (.-firstChild dom))
-
-        mark-and-inject (fn [^js/Node child-dom]
-                          (cond
-                            (not= child-dom @!dom-cursor)
-                            (if @!dom-cursor
-                              (.insertBefore dom child-dom @!dom-cursor)
-                              (.appendChild dom child-dom))
-
-                            :else
-                            (reset! !dom-cursor (.-nextSibling @!dom-cursor)))
-                          (gobj/set child-dom MARK-SYM true))
+                      old-child-doms))
 
         take-el-dom (fn [tag props]
                       (let [matcher [(:z/sel props) (:z/key props)]
@@ -392,34 +448,55 @@ one sequence.
                           (do
                             (swap! !child-doms update :text subvec 1)
                             existing)
-                          (js/document.createTextNode "")))]
-    (doseq [vnode children]
-      (cond
-        (vector? vnode)
-        (let [[tag props body] (preproc-vnode vnode)
-              child-dom (take-el-dom tag props)
-              old-props (gobj/get child-dom PROPS-SYM)]
-          (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
-            (patch-props child-dom !instance-state props)
-            (patch-children child-dom !instance-state body))
-          (mark-and-inject child-dom)
-          
-          ;; keep track of <link> elements so we can make them
-          ;; react to hot reloads
-          (when (and DEBUG
-                  (= (.-nodeName child-dom) "LINK")
-                  (contains? #{"stylesheet" "preload"} (.-rel child-dom)))
-            (swap! !css-links conj child-dom)))
-        
-        :else
-        (let [child-dom (take-text-dom)]
-          (set! (.-nodeValue child-dom) (str vnode))
-          (mark-and-inject child-dom))))
-    (doseq [dom-child (-> dom .-childNodes js/Array.from)]
-      (when-not (gobj/get dom-child MARK-SYM)
-        (cleanup-dom dom-child !instance-state)
-        (.removeChild dom dom-child))
-      (gobj/set dom-child MARK-SYM false))))
+                          (js/document.createTextNode "")))
+
+        new-child-doms (mapv
+                         (fn process-children [vnode]
+                           (cond
+                             (vector? vnode)
+                             (let [[tag props body] (preproc-vnode vnode)
+                                   child-dom (take-el-dom tag props)
+                                   old-props (gobj/get child-dom PROPS-SYM)]
+                               (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
+                                 (patch-props child-dom !instance-state props)
+                                 (patch-children child-dom !instance-state body))
+                               child-dom)
+
+                             :else
+                             (let [child-dom (take-text-dom)]
+                               (set! (.-nodeValue child-dom) (str vnode))
+                               child-dom)))
+                         children)
+
+        focused-doms (:doms-on-focus-path @!instance-state)
+        index-of-focused-child-in-new (when (seq focused-doms) (base/index-of (partial contains? focused-doms) new-child-doms))]
+
+    ;; keep track of <link> elements so we can make them
+    ;; react to hot reloads
+    (when DEBUG
+      (doseq [child-dom new-child-doms
+              :when (and
+                      (= (.-nodeName child-dom) "LINK")
+                      (contains? #{"stylesheet" "preload"} (.-rel child-dom)))]
+        (swap! !css-links conj child-dom)))
+
+    ;; apply changes
+    (if (nil? index-of-focused-child-in-new)
+      (apply-dom-changes dom (.-firstChild dom) (calc-child-dom-changes old-child-doms new-child-doms #{}) !instance-state)
+      (let [focused-child-dom (get new-child-doms index-of-focused-child-in-new)
+            index-of-focused-child-in-old (or (base/index-of (partial = focused-child-dom) old-child-doms) (count old-child-doms))
+            changes-before-focused-dom (calc-child-dom-changes
+                                         (subvec old-child-doms 0 index-of-focused-child-in-old)
+                                         (subvec new-child-doms 0 index-of-focused-child-in-new)
+                                         #{})
+            changes-after-focused-dom (calc-child-dom-changes
+                                        (subvec old-child-doms (inc index-of-focused-child-in-old))
+                                        (subvec new-child-doms (inc index-of-focused-child-in-new))
+                                        #{})]
+        (apply-dom-changes dom (.-firstChild dom) changes-before-focused-dom !instance-state)
+        (apply-dom-changes dom (.-nextSibling focused-child-dom) changes-after-focused-dom !instance-state)))
+
+    (gobj/set dom CHILDREN-SYM new-child-doms)))
 
 (defn- render [^js/ShadowRoot dom ^js/ElementInternals internals !instance-state vnode]
   (let [!static-state (-> dom .-host .-constructor (gobj/get PRIVATE-SYM))
@@ -497,11 +574,15 @@ one sequence.
                              "update"
                              (do
                                (swap! !instance-state assoc :connected true)
-                               "connect"))]
-            (js/setTimeout
-              (fn []
-                (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false}))
-                (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))
+                               "connect"))
+                observed-events (set (keep #(when (pos? (val %)) (key %)) (get @!instance-state :lifecycle-event-listener-counts)))]
+            (when (seq observed-events)
+              (js/setTimeout
+                (fn []
+                  (when (contains? observed-events event-type)
+                    (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false})))
+                  (when (contains? observed-events "render")
+                    (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))))
 
 (defn- request-render [^js/Node dom]
   (swap! !dirty conj dom)
@@ -530,7 +611,12 @@ one sequence.
                                (when-not (contains? (:props @!instance-state) (:prop prop-spec))
                                  (try
                                    (let [state ((:state-factory prop-spec) instance)
-                                         watch-key [::state-prop (:prop prop-spec) instance]]
+                                         watch-key [::state-prop (:prop prop-spec) instance]
+                                         cleanup-fn (fn []
+                                                      (swap! !instance-state update :props dissoc (:prop prop-spec))
+                                                      (remove-watch state watch-key)
+                                                      (when-let [state-cleanup (:state-cleanup prop-spec)]
+                                                        (state-cleanup state instance)))]
                                      (when-not (satisfies? IWatchable state)
                                        (throw (ex-info "State factory produced something not watchable" {:state state :component name})))
                                      (when (satisfies? IDeref state)
@@ -540,11 +626,7 @@ one sequence.
                                          (swap! !instance-state assoc-in [:props (:prop prop-spec)] new-val)
                                          (when (:connected @!instance-state)
                                            (request-render instance))))
-                                     (.addEventListener (:shadow @!instance-state) "disconnect"
-                                       (fn []
-                                         (remove-watch state watch-key)
-                                         (when-let [state-cleanup (:state-cleanup prop-spec)]
-                                           (state-cleanup state instance)))))
+                                     (swap! !instance-state update :cleanup-fns (fnil conj #{}) cleanup-fn))
                                    (catch :default e
                                      (js/console.error "Error initializing state prop" e)))))))
         default-css (cond-> [DEFAULT-CSS]
@@ -583,11 +665,15 @@ one sequence.
                 (let [^js/Node this (js* "this")
                       !instance-state (gobj/get this PRIVATE-SYM)
                       ^js/ShadowRoot shadow (:shadow @!instance-state)]
-                  (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false}))
+                  (when (pos? (get-in @!instance-state [:lifecycle-event-listener-counts "disconnect"]))
+                    (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false})))
                   (swap! !dirty disj this)
                   (swap! !static-state update :instances disj this)
                   (swap! !instance-state assoc :connected false)
-                  (doseq [^js/Node child-dom (-> shadow .-childNodes js/Array.from)]
+                  (doseq [cleanup-fn (:cleanup-fns @!instance-state)]
+                    (cleanup-fn))
+                  (swap! !instance-state assoc :cleanup-fns #{})
+                  (doseq [^js/Node child-dom (gobj/get shadow CHILDREN-SYM)]
                     (cleanup-dom child-dom !instance-state)
                     (.remove child-dom))
                   (assert (= {} (:binds @!instance-state)))))
@@ -625,7 +711,7 @@ one sequence.
                 (let [!instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))]
                   (cond
                     (js* "~{} === undefined" x)
-                    (swap! !instance-state update :props dissoc (:prop prop-spec)) 
+                    (swap! !instance-state update :props dissoc (:prop prop-spec))
 
                     :else
                     (swap! !instance-state assoc-in [:props (:prop prop-spec)] x))
@@ -660,15 +746,53 @@ one sequence.
                             })")]
         (gobj/set new-class PRIVATE-SYM (atom {:instances #{}}))
         (js/Object.defineProperty (.-prototype new-class) "init"
-          #js{:value (fn []
-                       (let [^js this (js* "this")]
-                         (gobj/set this PRIVATE-SYM
-                           (atom
-                             {:shadow (.attachShadow this #js{:mode "open" :delegatesFocus (= focus :delegate)})
-                              :internals (.attachInternals this)
-                              :props {}}))))
+          #js{:value
+              (fn []
+                (let [^js this (js* "this")
+                      ^js shadow (.attachShadow this #js{:mode "open" :delegatesFocus (= focus :delegate)})
+                      !instance-state (atom
+                                        {:shadow                          shadow
+                                         :internals                       (.attachInternals this)
+                                         :props                           {}
+                                         :lifecycle-event-listener-counts {}
+                                         :doms-on-focus-path              #{}})]
+                  (gobj/set this PRIVATE-SYM !instance-state)
+                  (.addEventListener shadow "focusin"
+                    (fn [^js event]
+                      (let [event-path (.composedPath event)
+                            shadow-index (.indexOf event-path (:shadow @!instance-state))]
+                        (swap! !instance-state assoc :doms-on-focus-path (set (.slice event-path 0 shadow-index)))))
+                    true)
+                  (.addEventListener shadow "focusout"
+                    (fn [^js event]
+                      (when (or (nil? (.-relatedTarget event)) (not (.contains shadow (.-relatedTarget event))))
+                        (swap! !instance-state assoc :doms-on-focus-path #{})))
+                    true)
+                  (let [orig-add-event-listener (.bind (.-addEventListener shadow) shadow)
+                        orig-remove-event-listener (.bind (.-removeEventListener shadow) shadow)]
+                    (js/Object.defineProperties shadow
+                      #js{:addEventListener
+                          #js{:value
+                              (fn add-event-listener-override [type & others]
+                                (case type
+                                  ("connect" "disconnect" "update" "render")
+                                  (swap! !instance-state update-in [:lifecycle-event-listener-counts type] (fnil inc 0))
+                                  nil)
+                                (apply orig-add-event-listener type others))
+                              :configurable false
+                              :writable     false}
+                          :removeEventListener
+                          #js{:value
+                              (fn remove-event-listener-override [type & others]
+                                (case type
+                                  ("connect" "disconnect" "update" "render")
+                                  (swap! !instance-state update-in [:lifecycle-event-listener-counts type] (fnil dec 0))
+                                  nil)
+                                (apply orig-remove-event-listener type others))
+                              :configurable false
+                              :writable     false}}))))
               :configurable false
-              :writable false})
+              :writable     false})
         (patch-el-class new-class things)
         (js/customElements.define el-name new-class))))
   nil)
