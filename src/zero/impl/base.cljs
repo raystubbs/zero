@@ -20,3 +20,10 @@
        words
        (map str/lower-case)
        (str/join "-")))
+
+(defn index-of [pred coll]
+  (->>
+    (keep-indexed
+      (fn [idx v] (when (pred v) idx))
+      coll)
+    first))
