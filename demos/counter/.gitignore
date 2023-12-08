@@ -3,3 +3,4 @@ node_modules
 .cpcache
 .calva
 .DS_Store
+pub/js
