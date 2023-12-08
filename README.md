@@ -32,11 +32,11 @@ repo yet, [use the SHA](https://clojure.org/news/2018/01/05/git-deps).
 
 ## Useful Links
 - [TodoMVC Demo](demos/todomvc)
-  - [Live](demos/todomvc/pub/index.html)
-  - [Build Report](demos/todomvc/pub/js/report.html)
+  - [Live][todomvc-demo]
+  - [Build Report](https://raystubbs.github.io/zero/demos/todomvc/pub/js/report.html)
 - [Counter Demo](demos/counter)
-  - [Live](demos/counter/pub/index.html)
-  - [Build Report](demos/counter/pub/js/report.html)
+  - [Live][counter-demo]
+  - [Build Report](https://raystubbs.github.io/zero/demos/counter/pub/js/report.html)
 - [The Cookbook (Coming Soon)](COOKBOOK.md)
 - [Markup Syntax][markup-doc]
 
@@ -353,6 +353,7 @@ value when the patch operation is applied.
 - Clojurians: [@Ray Stubbs](https://clojurians.slack.com/team/U062WV76S1W)
 
 [wc]: https://developer.mozilla.org/en-US/docs/Web/API/Web_components
-[counter-demo]: https://raw.githubusercontent.com/raystubbs/zero/main/demos/counter/pub/index.html
+[counter-demo]: https://raystubbs.github.io/zero/demos/counter/pub/index.html
+[todomvc-demo]: https://raystubbs.github.io/zero/demos/todomvc/pub/index.html
 [markup-doc]: MARKUP.md
 [delegates-focus]: https://developer.mozilla.org/en-US/docs/Web/API/ShadowRoot/delegatesFocus

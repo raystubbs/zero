@@ -27,9 +27,9 @@
   :view (fn [{:keys [items]}]
           (let [completed-items (vec (filter :completed? items))]
             [:root>
-             :z/css ["/css/app.css"
-                     "/node_modules/todomvc-common/base.css"
-                     "/node_modules/todomvc-app-css/index.css"]
+             :z/css [(js/URL. "node_modules/todomvc-common/base.css" js/document.baseURI)
+                     (js/URL. "node_modules/todomvc-app-css/index.css" js/document.baseURI)]
+             :z/style {:display "block"}
              :z/on {:connect (act [:ze.db/patch
                                    [{:path [:todo-items]
                                      :value []}]])}
