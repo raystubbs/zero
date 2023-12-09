@@ -4,8 +4,8 @@ front-ends in ClojureScript.
 
 - Uses modern APIs, works on the latest versions of all
   major browsers... but will break in some not-so-old
-  versions.  In particular it depends on:
-  + [Constructable `CSSStyleSheet`](https://caniuse.com/mdn-api_cssstylesheet_cssstylesheet)
+  versions.  In particular, it depends on:
+  + [`CSSStyleSheet` constructor](https://caniuse.com/mdn-api_cssstylesheet_cssstylesheet)
   + [`ElementInternals`](https://caniuse.com/mdn-api_elementinternals)
 - Depends only on ClojureScript core
 - Small, with optional 'extras' modules
@@ -104,7 +104,7 @@ Let's take a look at a simple example that demonstrates these three concepts wor
 See it working [here][counter-demo].
 
 ### Actions
-Actions are 'callable values' in the sense that they has value semantics, but
+Actions are 'callable values' in the sense that they have value semantics, but
 can be called and used as event handlers.  The value semantics are important
 since it means actions can be compared, and only swapped out if they actually
 change; which isn't necessarily the case for functions.
@@ -143,7 +143,7 @@ This is the name used to reference the component when rendering it form another
 Zero component, it _must_ be a keyword. This is also what the actual web component
 name is derived from. To get the web component name from the Zero name, just replace
 the namespace delimiter `/` (if present) with `-`.  Custom element names _must_
-contain a hyphen, so if the keyword given for `:name` isn't namespaced then the name
+contain a hyphen, so if the keyword given for `:name` isn't namespace'd then the name
 portion of the keyword must contain a hyphen.
 
 ### `:view`
@@ -154,7 +154,7 @@ return value.
 
 ### `:props` (optional)
 This tells Zero how to build a prop map for the `:view` function, and what kinds of
-changes to observe (i.e when to re-render the component).
+changes to observe (i.e. when to re-render the component).
 
 In its most verbose configuration this should be a map of `prop name -> prop spec map`,
 where the `prop spec map` can include the following options:
@@ -186,11 +186,11 @@ where the `prop spec map` can include the following options:
    thing.  The prop will react to changes to said thing.  If the thing is also `IDeref`,
    then it'll be deref'd for an initial value; otherwise the initial value will be `nil`.
 - `:state-cleanup` (function, optional) <br>
-   If this prop is a state prop, then this function will be called to cleanup the
+   If this prop is a state prop, then this function will be called to clean up the
    state when the component instance disconnects from the browser DOM.  It'll be
    passed the prop's state object and the component instance.  Ignored for non-state props.
 
-As a convenience, Zero also supports several shorthands for common prop configurations:
+As a convenience, Zero also supports several short hands for common prop configurations:
 - `#{<prop names>...}` <br>
   If the `:prop` option is given as a set of prop names instead of a map, Zero sees it
   as equivalent to: `{<prop name> {:field <cammel cased prop name>} ...}`
@@ -231,7 +231,7 @@ the args, after substituting any injectors.
     ...do something else...))
 ```
 
-Now, the injection handlers is where things get a bit interesting.
+Now, the injection handlers are where things get a bit interesting.
 
 ```clojure
 (z/reg-injector
@@ -254,8 +254,8 @@ was called as an event handler, has the following shape:
 ```
 
 ## Data Streams
-Data streams are registered via `z/reg-stream`.  It basically consists of a bootup function
-that sets the stream up, and can return a cleanup function that'll be called to cleanup
+Data streams are registered via `z/reg-stream`.  It basically consists of a boot up function
+that sets the stream up, and can return a cleanup function that'll be called to clean up
 when the stream is no longer being used.
 ```clojure
 (z/reg-stream
