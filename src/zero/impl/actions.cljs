@@ -32,13 +32,15 @@
       (.preventDefault ev))
     (when (:stop-propagation? props)
       (.stopPropagation ev))
-    (perform! act
-      {:shape :z/event-context
-       :event ev
-       :data (config/harvest-event ev)
-       :target (.-target ev)
-       :root (.getRootNode (.-currentTarget ev))
-       :current (.-currentTarget ev)})))
+    (let [^js root (.getRootNode (.-currentTarget ev))]
+      (perform! act
+        {:shape   :z/event-context
+         :event   ev
+         :data    (config/harvest-event ev)
+         :target  (.-target ev)
+         :root    root
+         :host    (when (instance? js/ShadowRoot root) (.-host root))
+         :current (.-currentTarget ev)}))))
 
 (defonce ^:private !effects (atom {}))
 (defonce ^:private THROTTLE-STATE (js/Symbol "zThrottleState"))

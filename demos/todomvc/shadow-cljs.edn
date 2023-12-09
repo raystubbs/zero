@@ -1,0 +1,11 @@
+{:deps {:aliases []}
+ :dev-http {8000 "pub"}
+ :builds {:app
+          {:target :browser
+           :output-dir "pub/js"
+           :asset-path "/js"
+           :compiler-options {:infer-externs true
+                              :warnings {:redef false}}
+           :build-hooks [(shadow.cljs.build-report/hook)]
+           :devtools {:watch-dir "pub/css" :watch-path "/css"}
+           :modules {:app {:entries [zero.demo.app]}}}}}

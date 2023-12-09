@@ -741,7 +741,7 @@ one sequence.
       (let [new-class (js* "(class extends HTMLElement {
                                 constructor() {
                                     super();
-                                    this.init()
+                                    this['init']()
                                 }
                             })")]
         (gobj/set new-class PRIVATE-SYM (atom {:instances #{}}))

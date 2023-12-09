@@ -31,370 +31,329 @@ in the future.  Use at your own risk.  Not available in a package
 repo yet, [use the SHA](https://clojure.org/news/2018/01/05/git-deps).
 
 ## Useful Links
-- [The API Reference (Coming Soon)](API.md)
-- [The Demo (TodoMVC)](demo)
+- [TodoMVC Demo](demos/todomvc)
+  - [Live][todomvc-demo]
+  - [Build Report](https://raystubbs.github.io/zero/demos/todomvc/pub/js/report.html)
+- [Counter Demo](demos/counter)
+  - [Live][counter-demo]
+  - [Build Report](https://raystubbs.github.io/zero/demos/counter/pub/js/report.html)
 - [The Cookbook (Coming Soon)](COOKBOOK.md)
-- [Markup Syntax](MARKUP.md)
+- [Markup Syntax][markup-doc]
 
 ## Organization
 - `zero.core` has all the essentials
 - `zero.extras.*` has stuff that's optional, but nice to have
   + Require `zero.extras.all` to pull everything into the build
 
-## Defining Components
+## Basic Concepts
+Zero is built around three main concepts: components, actions, and bindings.
+The components produced by Zero are just ordinary [web components][wc], they're
+configured via properties and attributes, and dispatch their own events.  So really
+Zero components can be used and created without the other state management facilities...
+actions and bindings are just the cherry on top, they help build robust
+and clean web components.
+
+Let's take a look at a simple example that demonstrates these three concepts working in concert:
 ```clojure
-(ns example
- [zero.core :refer [<< act bnd]:as z])
+(ns zero.demo.app
+  (:require
+    [zero.core :refer [<< act bnd] :as z]
+    [zero.extras.all]))
 
-(z/component
- :name ::example
- :props {:target :attr}
- :view (fn [{:keys [target]}]
-         [:div "Hello, " target "!"]))
-```
+(defonce !count (atom nil))
 
-Now we can render the component via HTML like this:
-```html
-<example-example target="World"><example-example>
-```
+(z/reg-stream
+  ::count
+  (fn count-stream-setup [rx & _args]
+    (let [interval (js/setInterval #(swap! !count inc) 1000)]
+      (reset! !count 0)
+      (rx @!count)
+      (add-watch !count ::count (fn [_ _ _ v] (rx v)))
 
-Or within another Zero component like this:
-```clojure
-[::example :target "World"]
-```
-
-### `:props`
-The `:props` parameter determines which keys are passed into the `:view`
-function, and where the values for those keys come from.  This can be
-either a set or a map.
-
-If given as a set, all values are interpreted as field props.  This is
-equivalent to a map with the set values as keys its keys, and all values
-set to `:field`.
-
-If given as a map, its values can be one of:
-
-- `:field`
-  Equivalent to:
-  ```clojure
-  {:field <the key as a cammel case string>}
-  ```
-
-- `:attr`
-  Equivalent to:
-  ```clojure
-  {:field <the key as a cammel case string> :attr <the key as a string>}
-  ```
-
-- An `IWatchable` thing
-  Equivalent to:
-  ```clojure
-  {:state-factory (constantly <the watchable thing>)}
-  ```
-
-- A function
-  That takes the component instance and returns an `IWatchable`.
-  Equivalent to:
-  ```clojure
-  {:state-factory <the function>}
-  ```
-- A map
-  + `:field` (optional): A field name.  If given the generated
-    component will have a field with this name, when the field
-    changes the component will update accordingly.
-  + `:attr` (optional): An attribute name.  If given, the
-    generated component will observe the attribute with the
-    given name, reacting to any changes.
-  + `:attr-mapper` (optional): A function to convert the attribute
-    (string value) to something more useful
-  + `:state` (optionl): An `IWatchable` thing, the component
-    will react to changes on it
-  + `:state-factory` (optional): A function that, given
-    the component (DOM node), returns an `IWatchable` that
-    the component will react to.
-  + `:state-cleanup` (optional): A function to cleanup the
-    state prop, receives the state object itself and the
-    component (DOM node).  Called whent the component is
-    disconnected.
-
-### `:view`
-A function used to render the component.  This should return
-a [Hiccup](https://github.com/weavejester/hiccup/wiki/Syntax)-like
-data structure that represents the markup to be rendered.
-
-Zero's markup syntax does have some differences from hiccup,
-check out the [Markup Syntax Doc](MARKUP.md) for details,
-but here's the gist:
-
-- A `[:root> ...]` pseudo-vnode can be given as the root
-  of the returned vdom.  Event handlers for the component's
-  ShadowDOM can be attached to this vnode, as well as default
-  styling for the component, stylesheets to be adopted, and
-  element internals (not yet implemented).
-- Props can be given either within a map, or as flat key-value
-  pairs after the vnode tag (keys must be keywords).  For example:
-  `[:input :type "foo"]` is equivalent to `[:input {:type "foo"}]`.
-- All 'special' props (handled by Zero itself) are namespaced
-  with `z`.  So for example the `:style` prop is set literally
-  just like any other prop, but `:z/style` accepts a style map.
-- Nested vnodes are represented with a vector as their tag
-  (e.g `[[:div :span] ...]` vs `[:div>span ...]`)
-
-## State Management
-Zero components are just regular web components.  As such, their
-state can be managed in the same way you'd do so for any native
-element: by listening for events and updating attributes or properties.
-
-Here's a simple example:
-```clojure
-(z/component
- :name :my-ticker
- :props #{:tick}
- :view (fn [{:keys [tick]}]
-        [:root>
-          :z/on {:connect
-                 (fn [^js event]
-                   (set! (.. event -target -_interval)
-                    (js/setInterval #(.dispatchEvent (Event. "tick")) 1000)))
-                 :disconnect
-                 (fn [^js event]
-                   (js/clearInterval (.. event -target -_interval)))}
-          [:div "Ticks: " (or tick 0)]]))
-```
-```html
-<my-ticker> </my-ticker>
-<script>
-  const ticker = document.querySelector("my-ticker");
-  ticker.addEventListener("tick", () => {
-    ticker.tick = (tick && tick + 1) || 1
-  })
-</script>
-```
-
-However Zero offers some facilities to simplify this task.
-
-### Actions
-Actions offer a declarative way to describe side effects.  They're
-callable objects with value semantics (can be compared, printed, etc.).
-
-These can be used as event handlers in place of functions; with several
-benefits:
-
-- Rendering logic can be more efficient, since actions that compare
-  equal don't need to be replaced
-- View rendering functions tend to be simpler when using actions,
-  side effect logic is separated from the rendering/markup
-- Actions offer some useful event handler functionality buit-in, including:
-  + Logging
-  + Throttling
-
-Actions are constructed with (an optional) option map, followed by a
-sequence of side effect specifications:
-
-```clojure
-;; Adding `:log? true` property causes the action to
-;; be logged every time it's called; this is very
-;; useful for debugging.
-(def my-action (act {:log? true}
-                [::say-hello (<< ::whom)]
-                [::say-goodbye (<< ::whom)]))
+      ;; cleanup when the stream winds down
+      (fn count-stream-cleanup []
+        (js/clearInterval interval)))))
 
 (z/reg-effect
- ::say-hello
- (fn [whom]
-  (js/console.log "Hello, " whom "!"))
- ::say-goodbye
- (fn [whom]
-  (js/console.log "Goodbye, " whom "!")))
+  ::dispatch-event
+  (fn dispatch-event! [target type]
+    (.dispatchEvent target (js/Event. (name type))))
 
-;; Injectors receive a context, provided by the action
-(z/reg-injector
- ::whom
- (fn [{:keys [^js/Node root] :as context} & _args]
-  (-> (.querySelector root "input.whom") .-value)))
+  ::reset-count
+  (fn reset-count! []
+    (reset! !count 0)))
 
-;; When an action is called with an event (i.e used as an
-;; event handler), the context is derived from the event
-;; automatically.
-(my-action (js/Event. "fake"))
-;; Context provided to injectors:
-;; {:data <data extracted from event>
-;;  :target <event target>
-;;  :current <dom node the handler/action is attached to>
-;;  :root <$.getRootNode of :current>
-;;  :event <the raw event>
-;;  :shape :z/event-context}
+(z/component
+  :name ::counter
+  :props #{:count}
+  :view (fn [{:keys [count]}]
+          [:root>
+           count
+           [:button
+            :z/style {:margin-left "1rem"}
+            :z/on {:click (act {:log? true} [::dispatch-event (<< :ze/ctx :host) :reset])}
+            "Reset"]]))
 
-;; When called with anything other than an event,
-;; the provided value is taken as the context.
-(my-action {:root js/document.body})
-;; Context provided to injectors:
-;; {:root <the document body>}
+(z/component
+  :name :z/app
+  :view (fn []
+          [::counter
+           :count (bnd ::count)
+           :z/on {:reset (act {:log? true} [::reset-count])}]))
 ```
+See it working [here][counter-demo].
 
-Actions can be throttled by setting the `:throttle <time-in-ms>`
-option.  The default `:throttle-strategy` is `:default`, which
-has a leading call; use `:debounce` to skip this.
+### Actions
+Actions are 'callable values' in the sense that they has value semantics, but
+can be called and used as event handlers.  The value semantics are important
+since it means actions can be compared, and only swapped out if they actually
+change; which isn't necessarily the case for functions.
+
+In essence, an action is a sequence of side effects to be performed when invoked.
+And these side effects may include 'injectors', which can grab a value from the
+action's execution context and pass it into the effect handler.  In the above
+example injector `(<< :ze/ctx :host)` grabs the `:host` (the component's DOM node)
+from the action's execution context and passes it to the `::dispatch-event` effect
+handler.
 
 ### Bindings
-Zero's rendering engine has a very convenient feature: bindings.
-If the value passed as a vnode prop is something that's `IWatchable`
-(i.e an atom, var, etc) then that prop will be bound reactively to
-the value.  This means that when the `IWatchable` changes, the
-element it's attached to will be re-rendered with the new value.  If
-said value also satisfies `IDeref` then that protocol will be used
-to extract its initial value; otherwise it will be assumed `nil`.
+In the same way that actions are 'callable values', bindings are 'watchable values'.
+This is significant because when you give an `IWatchable` as a component's prop, Zero
+binds the prop to that thing; updating the prop when its underlying value changes.
 
-Here's a simple example:
+When a binding instance is watched or deref'd, the actual value that will be received
+from it is that of the underlying data stream; so when we give a binding as a component's
+prop, what actually gets bound to is a data stream.
+
+## Defining Components
+As mentioned above, Zero components are just regular web components.  So when we call
+`z/component`, Zero generates a web component class and registers it with the browser's
+custom element registry.
 
 ```clojure
-(def !counter (atom 0))
-
-(js/setInterval #(swap! !counter inc) 1000)
-
 (z/component
- :name ::counter
- :prop #{:count}
- :view (fn [{:keys [count]}]
-        [:div count]))
-
-(z/component
- :name ::counter-container
- :view (fn []
-        [::counter :count !counter]))
-```
-```html
-<counter-container></counter-container>
+ :name ::hello
+ :props {:whom {:field "whom" :attr  "whom"}}
+ :view (fn [{:keys [whom]}]
+         [:div "Hello, " whom "!"]))
 ```
 
-As the `!counter` increments here, the `::counter` element will
-reactively update.
+### `:name`
+This is the name used to reference the component when rendering it form another
+Zero component, it _must_ be a keyword. This is also what the actual web component
+name is derived from. To get the web component name from the Zero name, just replace
+the namespace delimiter `/` (if present) with `-`.  Custom element names _must_
+contain a hyphen, so if the keyword given for `:name` isn't namespaced then the name
+portion of the keyword must contain a hyphen.
 
-While these mechanics work for any `IWatchable` thing, Zero
-also provides an explicit type for bindings, which is `IDeref`,
-`IWatchable`, _and_ has value semantics.
+### `:view`
+This is the function that actually renders the component.  It'll be passed a map
+of props, and should return a virtual DOM that Zero will use to patch the component's
+actual shadow DOM.  See the [markup doc][markup-doc] for details on the shape of its
+return value.
 
+### `:props` (optional)
+This tells Zero how to build a prop map for the `:view` function, and what kinds of
+changes to observe (i.e when to re-render the component).
+
+In its most verbose configuration this should be a map of `prop name -> prop spec map`,
+where the `prop spec map` can include the following options:
+
+- `:field` (string, optional) <br>
+   This gives the field name to generate for the prop.  Zero will add a property to
+   the generated element class with the given name; when said property changes this
+   prop will update, causing the component to re-render.  If a `:field` option isn't
+   explicitly given, _and_ this isn't a state prop (doesn't have `:state` or `:state-factory`)
+   then Zero default this to the cammelCase form of the prop name.  If this _is_ a state
+   prop, and the `:field` option is omitted, then no property will be added to the class
+   for this prop.  If this _is_ a state prop, and the `:field` option is given explicitly,
+   then a _read only_ property will be generated for the prop, with its actual value coming
+   from the bound state.
+- `:attr` (string, optional) <br>
+   This gives an attribute name that Zero should map to this prop.  If given, Zero will
+   observe updates to said attribute on a component instance, and update the prop accordingly;
+   causing the component to be re-rendered.  If no `:attr` is given, then this prop will
+   not be mapped to an attribute.
+- `:attr-mapper` (function, optional) <br>
+   If given, _and_ an `:attr` option is set, this function will be called to map the attribute's
+   raw string value to a more useful prop value.
+- `:state` (`IWatchable`, optional) <br>
+   Equivalent to `:state-factory (constantly <the state>)`.  See below.
+- `:state-factory` (function, optional) <br>
+   If present then this prop is classified as a 'state prop', driven by some external
+   state instead of the instance's attributes or properties.  This is a function which,
+   given a reference to the component instance (an `HTMLElement`), returns an `IWatchable`
+   thing.  The prop will react to changes to said thing.  If the thing is also `IDeref`,
+   then it'll be deref'd for an initial value; otherwise the initial value will be `nil`.
+- `:state-cleanup` (function, optional) <br>
+   If this prop is a state prop, then this function will be called to cleanup the
+   state when the component instance disconnects from the browser DOM.  It'll be
+   passed the prop's state object and the component instance.  Ignored for non-state props.
+
+As a convenience, Zero also supports several shorthands for common prop configurations:
+- `#{<prop names>...}` <br>
+  If the `:prop` option is given as a set of prop names instead of a map, Zero sees it
+  as equivalent to: `{<prop name> {:field <cammel cased prop name>} ...}`
+- `{<prop name> :field}`<br>
+  Equivalent to `{<prop name> {:field <cammel cased prop name>}}`.
+- `{<prop name> :attr}`<br>
+  Equivalent to `{<prop name> {:attr (name <prop name>)}}`.
+- `{<prop name> <IWatchable thing>}`<br>
+  Equivalent to `{<prop name> {:state <IWatchable thing>}}`.
+
+### `:focus` (optional)
+This option can be given as one of:
+
+- `:self` - if no tab index is set for the component, then it'll be implicitly set to `0` on render,
+  ensuring that the component is focusable by default.
+- `:delegate` - the [`delegatesFocus`][delegates-focus] option will be enabled for the component's
+  ShadowRoot.  This cannot be disabled on hot reload.
+
+### `:inherit-doc-css?` (optional)
+If given as a truthy value then Zero will look through the top level document for stylesheet links
+and include their styling in the component.  This process relies on fetching the CSS into CSSStyleSheets,
+which ignore imports.  So be aware that any imports will be ignored.
+
+## Handling Effects
+Effects are a way to specify 'what should be done' in a declarative data oriented way, generally
+from an action.  We use `z/reg-effect` to register effect handlers... and that's really all there
+is to know about them.  When an effect is requested Zero will call the respective handler with
+the args, after substituting any injectors.
+
+```clojure
+(z/reg-effect
+ :example-effect-1
+  (fn [& args]
+    ...do something...)
+
+  :example-effect-2
+  (fn [& args]
+    ...do something else...))
+```
+
+Now, the injection handlers is where things get a bit interesting.
+
+```clojure
+(z/reg-injector
+  :select
+  (fn [{:keys [^js/ShadowRoot root]} selector]
+    (.querySelector root selector)))
+```
+
+Injection handlers are passed a context object.  For injectors found in an action,
+the context they're given is the action's execution context, which, if the action
+was called as an event handler, has the following shape:
+```clojure
+{:shape   :z/event-context
+ :event   (comment "the event that trigger the action, this will be stale")
+ :data    (comment "the data that Zero extracted from the event before it went stale")
+ :target  (comment "the event target")
+ :current (comment "the element to which the action was attached as event handler")
+ :root    (comment "the root node of :current")
+ :host    (comment "if :root is a ShadowRoot, then root.host; will generally be the current component's instance")}
+```
+
+## Data Streams
+Data streams are registered via `z/reg-stream`.  It basically consists of a bootup function
+that sets the stream up, and can return a cleanup function that'll be called to cleanup
+when the stream is no longer being used.
 ```clojure
 (z/reg-stream
- ::count
- (fn [rx & _args]
-  (let [!count (atom 0)
-        interval-id (js/setInterval #(swap! !count inc) 1000)]
-    ;; call `rx` to update the stream's value
-    (rx @!count)
-    (add-watch !count ::count (fn [_ _ _ new-val] (rx new-val)))
-
-    ;; return a cleanup function, this will be called whenever
-    ;; the stream is no longer being used and is being wound down
-    (fn cleanup []
-      (remove-watch !count ::count)
-      (js/clearInterval interval-id)))))
-
-(z/component
- :name ::counter
- :prop #{:count}
- :view (fn [{:keys [count]}]
-        [:div count]))
-
-(z/component
- :name ::counter-container
- :view (fn []
-        [::counter :count (bnd ::count)]))
+  ::my-stream
+  (fn boot-my-stream [rx & _args]
+    ;; call `rx` with a value to push new data to the stream
+    (fn cleanup-my-stream []
+      ;; do any cleanup here
+      )))
 ```
 
-Bindings can also take an option map.  Providing a `:default`
-property gives a default value for the binding, which will be
-used until the underlying stream's first call to `rx`.  A
-`:default-nil? true` property tells the binding to return
-the default value anytime it's underlying stream value is `nil`.
+A data stream is identified by the stream key (in this case `::my-stream`) _and_ all its args.  So
+for example `(bnd ::my-stream 1 2 3)` will tap into a _different_ stream than `(bnd ::my-stream 3 2 1)`;
+though both will use the same function to boot up.
 
-Injectors work in bindings, but they won't be given anything useful
-as context.  For now their only practical use is to put off
-computation until the value is required... though I myself have
-not used them at all as of yet.
-
-## Styling
-Applying stylesheets to a component can be done in several ways:
-- Render `<link>` or `<style>` elements in the component `:view`
-- Pass a vector of stylesheet URLs or `CSSStyleSheet` objects to the
-  `:z/css` prop on `:root>`
-- Set `:inherit-doc-css? true` to have the component inherit any
-  stylesheets from the host document
-
-The recommended methods are `:inherit-doc-css?` and `:z/css`.  Any CSS
-inherited from the document via `:inherit-doc-css?` will be hot-reloaded
-properly.  URLs given in `:z/css` and component `<link>`s will only hot
-reload if the same URL is linked to from within the document root (outside
-of any Shadow DOM) via a `rel="stylesheet"` or `rel="preload"` link; and only
-if said link will be hot reloaded by other means (e.g shadow-cljs, figwheel).
-At the moment shadow-cljs only hot reloads `rel="stylesheet"` links.
-
-In practice `<link>`s within web components tend to produce
-[FOUC](https://en.wikipedia.org/wiki/Flash_of_unstyled_content#:~:text=A%20flash%20of%20unstyled%20content,before%20all%20information%20is%20retrieved.),
-while referencing a stylesheet from within `:z/css` causes it to be fetched
-into a `CSSStyleSheet` and cached; mitigating this issue somewhat.  Though
-the best approach, if practical, for avoiding FOUC in Zero is to preload the
-stylesheet in the root document via a `<link rel="preload">` and reference it
-within components via `:z/css`.
-
-As mentioned, stylehseets referenced via `:z/css` get converted into
-`CSSStyleSheet` instances, which will ignore imports.  So be warned.
-In some cases a `<link>` or `<style>` element may be the only option.
-
-### Inline Styles
-Inline styles can be applied to rendered elements by attaching a
-`:z/style` style map to the vnode.  This translates directly to the
-`:style` (string) attribute.  So the two should never be used together.
+Zero also provides some useful utilities for dealing with streams (and `IWatchable` things in general)
+in the `zero.extras.stream` module.  This includes the `derived` utility for setting up derived streams
+based on multiple other `IWatchable` dependencies, and `watch` to react (with side effects) to changes
+in a set of dependencies.
 
 ```clojure
-[:button
- :z/style {:background "none" :border "none" :padding "0.25rem"}
- "My Button"]
+(ns example
+  (:require
+    [zero.core :as z]
+    [zero.extras.stream :as zstream]))
+
+(z/reg-stream
+ ::my-derived-stream
+  (zstream/derived
+    (fn [[my-stream-val other-stream-val] & _args]
+      ;; compute derived value
+      )
+    (bnd ::my-stream)
+    (bnd ::other-stream)))
+
+;; start reacting to changes
+(zstream/watch ::my-watch
+  (fn on-change! [my-stream-val my-derived-stream-val]
+    ;; do something when these dependencies change
+    )
+  (bnd ::my-stream)
+  (bnd ::my-derived-stream))
+
+;; stop watching
+(zstream/unwatch ::my-watch)
 ```
 
-### Default Component Syles
-Sometimes it can be useful to apply default styling to the web component
-host element, while still allowing users to make adjustments.  This can
-be done by applying inline styling via `:z/style` to the `:root>` vnode.
+## _The_ Database
+Many modern frameworks tend to encourage the use of a single in-memory database
+to store and manage all state (or business state) within front-end applications.
+Zero's core isn't based around this, but the library does provide an optional
+module that implements such a thing in `zero.extras.db`.  This is meant as a minimal
+DB implementation to help with basic state management in simple applications; if your
+needs are more complex or specialized than can be easily managed with this DB,  you
+are highly encouraged to look elsewhere for something more appropriate.  Any DB or
+data structure that supports watches/reactions/observation should be easily adaptable
+to work with Zero.
 
 ```clojure
-[:root>
- :z/style {:display "inline-block" :padding "0.25rem"}]
+(ns example
+  (:require
+    [zero.extras.db :as db]))
+
+;; patch the DB via function
+(db/patch! [{:path [<path to the data>...] :value <something>}])
+(act [:ze.db/patch [{:path [<path to the data>...] :value <something>}]])
+
+;; get something from the DB
+(db/get [<path to the thing>])
+(<< :ze.db/path [<path to the thing>])
+(bnd :ze.db/path [<path to the thing>])
 ```
 
-### Classes
-Classes can be attached to an element via the `:z/class` prop, which accepts
-a string or collection of strings; and flattens it out before putting it into
-`className`.  As with `:z/style`, `:z/class` maps directly to `:class`, so the
-two should never be used together.
+The database will (somewhat) efficiently update _only_ the bindings that depend on something
+that has been changed from a patch.  The patch shape is fairly flexible, and designed to be
+composable; so for example a patch can be given as an event value, and its listener can
+apply the patch to a sub-path.
 
-```clojure
-[:div :z/class ["foo" "bar"]
- "Something"]
-```
+A patch consists of a collection of patch entries, each of which is a map that has a `:path`
+indicating what will be changed, and one of the following:
+- `:value` a raw value to set at the path
+- `:patch` a sub-patch to apply at the path
+- `:merge` a map to merge into the current value
+- `:conj` something to conj onto the current value
+- `:into` a collection to add into the current value
+- `:clear` a collection of keys or indexes to remove from the current set, map, or vector
+- `:fn` a function to call to update/transform the current value
 
-As a short-hand, literal classes can also be attached to vnode tag directly as
-`.<the-class>`.  Ids can be set similarly as `#<my-id>` directly after the main tag.
-
-```clojure
-[:div#something.foo.bar
- "Something"]
-```
-
-Though be weary, this notation is only allowed _after_ the namespace (for tags
-that have a namespace), the namespace itself is literal.
-
-## Focus
-To make a component's host element focusable use the `:focus :self` option, to make
-it delegate focus via [this](https://developer.mozilla.org/en-US/docs/Web/API/ShadowRoot/delegatesFocus)
-use `:focus :delegate`.
-
-For `:focus :self` Zero will attach an implicit `tabIndex = 0` to the element on
-render if a `:tabindex` isn't specified in its render props.
-
-The `:focus :delegate` option is configured when the element's ShadowRoot is created,
-so it cannot be changed on hot reload.
+An optional `:fnil` value can also be provided in a patch entry, if given, and the current
+path doesn't have a value or has a `nil` value; then this will be substituted as the current
+value when the patch operation is applied.
 
 ## Contact
 - [zero@raystubbs.me](mailto:zero@raystubbs.me)
 - Clojurians: [@Ray Stubbs](https://clojurians.slack.com/team/U062WV76S1W)
+
+[wc]: https://developer.mozilla.org/en-US/docs/Web/API/Web_components
+[counter-demo]: https://raystubbs.github.io/zero/demos/counter/pub/index.html
+[todomvc-demo]: https://raystubbs.github.io/zero/demos/todomvc/pub/index.html
+[markup-doc]: MARKUP.md
+[delegates-focus]: https://developer.mozilla.org/en-US/docs/Web/API/ShadowRoot/delegatesFocus
