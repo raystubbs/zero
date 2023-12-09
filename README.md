@@ -139,7 +139,7 @@ custom element registry.
 ```
 
 ### `:name`
-This is the name used to reference the component when rendering it form another
+This is the name used to reference the component when rendering it from another
 Zero component, it _must_ be a keyword. This is also what the actual web component
 name is derived from. To get the web component name from the Zero name, just replace
 the namespace delimiter `/` (if present) with `-`.  Custom element names _must_
@@ -342,7 +342,8 @@ indicating what will be changed, and one of the following:
 - `:conj` something to conj onto the current value
 - `:into` a collection to add into the current value
 - `:clear` a collection of keys or indexes to remove from the current set, map, or vector
-- `:fn` a function to call to update/transform the current value
+- `:fn` a function to call to update/transform the current value, if an `:args` collection
+  is also provided, these will be passed as extra arguments
 
 An optional `:fnil` value can also be provided in a patch entry, if given, and the current
 path doesn't have a value or has a `nil` value; then this will be substituted as the current
