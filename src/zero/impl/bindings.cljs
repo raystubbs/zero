@@ -6,13 +6,13 @@
 (defonce !stream-fns (atom {}))
 
 (defn- kill-stream [stream-ident]
-  (let [{:keys [kill-fn]} (get @!stream-states stream-ident)]
-    (when (fn? kill-fn)
-      (try
-        (kill-fn)
-        (catch :default e
-          (js/console.error "Error in stream cleanup fn" {:stream-key (nth stream-ident 0) :args (nth stream-ident 1)} e)))))
-  (swap! !stream-states dissoc stream-ident))
+  (when-let [kill-fn (get-in @!stream-states [stream-ident :kill-fn])]
+    (try
+      (kill-fn)
+      (catch :default e
+        (js/console.error "Error in stream cleanup fn" {:stream-key (nth stream-ident 0) :args (nth stream-ident 1)} e))))
+  (swap! !stream-states dissoc stream-ident)
+  nil)
 
 (defn- rx-fn [stream-ident]
   (fn rx [new-val]
@@ -28,9 +28,11 @@
               e)))))))
 
 (defn- boot-stream [[stream-key args :as stream-ident] new-watch]
+  (swap! !stream-states assoc stream-ident {:watches (conj {} new-watch)})
   (let [stream-fn (or (get @!stream-fns stream-key) (throw (ex-info "No stream registered for key" {:stream-key stream-key})))
         kill-fn (apply stream-fn (rx-fn stream-ident) (apply-injections args {}))]
-    (swap! !stream-states assoc stream-ident {:watches (conj {} new-watch) :kill-fn kill-fn})))
+    (swap! !stream-states assoc-in [stream-ident :kill-fn] kill-fn)
+    nil))
 
 (deftype Binding [props stream-key args]
   IDeref
