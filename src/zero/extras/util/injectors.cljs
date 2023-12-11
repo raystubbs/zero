@@ -5,9 +5,16 @@
 (z/reg-injector
   :ze/ctx
   (fn [context & path]
-    (get-in context path)))
+    (get-in context path))
 
-(z/reg-injector
   :ze/call
   (fn [_ f & args]
-    (apply f args)))
+    (apply f args))
+
+  :ze/act
+  (fn [_ & args]
+    (apply z/act args))
+
+  :ze/<<
+  (fn [_ & args]
+    (apply z/<< args)))
