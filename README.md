@@ -272,7 +272,7 @@ for example `(bnd ::my-stream 1 2 3)` will tap into a _different_ stream than `(
 though both will use the same function to boot up.
 
 Zero also provides some useful utilities for dealing with streams (and `IWatchable` things in general)
-in the `zero.extras.stream` module.  This includes the `derived` utility for setting up derived streams
+in `zero.extras.util`.  This includes `derived` for setting up derived streams
 based on multiple other `IWatchable` dependencies, and `watch` to react (with side effects) to changes
 in a set of dependencies.
 
@@ -280,11 +280,11 @@ in a set of dependencies.
 (ns example
   (:require
     [zero.core :as z]
-    [zero.extras.stream :as zstream]))
+    [zero.extras.util :as zu]))
 
 (z/reg-stream
  ::my-derived-stream
-  (zstream/derived
+  (zu/derived
     (fn [[my-stream-val other-stream-val] & _args]
       ;; compute derived value
       )
@@ -292,7 +292,7 @@ in a set of dependencies.
     (bnd ::other-stream)))
 
 ;; start reacting to changes
-(zstream/watch ::my-watch
+(zu/watch ::my-watch
   (fn on-change! [my-stream-val my-derived-stream-val]
     ;; do something when these dependencies change
     )
@@ -300,7 +300,7 @@ in a set of dependencies.
   (bnd ::my-derived-stream))
 
 ;; stop watching
-(zstream/unwatch ::my-watch)
+(zu/unwatch ::my-watch)
 ```
 
 ## _The_ Database
