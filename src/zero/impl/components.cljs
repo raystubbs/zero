@@ -1,6 +1,7 @@
 (ns zero.impl.components
   (:require
    [zero.impl.base :as base]
+   [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
    [zero.config :as config]
    [clojure.string :as str]
    [goog.object :as gobj]
@@ -11,88 +12,6 @@
 
 (defn- gen-uid []
   (swap! uid-seq + (js/BigInt 1)))
-
-(defn- flatten-body [body]
-  (mapcat
-    (fn flattener [item]
-      (cond
-        (seq? item) (mapcat flattener item)
-        (nil? item) nil
-        :else [item]))
-    body))
-
-(defn- normalize-vnode "
-Given a vnode like `[tag-or-tags {...props}|...props & body]`
-yields `[tag-or-tags props body]`.
-" [vnode]
-  (if (map? (nth vnode 1 nil))
-    [(nth vnode 0) (nth vnode 1) (flatten-body (nthrest vnode 2))]
-    (loop [props {}
-           [prop-name prop-val & other :as all] (rest vnode)]
-      (if-not (keyword? prop-name)
-        [(nth vnode 0) props (flatten-body all)]
-        (recur (assoc props prop-name prop-val)
-               other)))))
-
-(comment
-  (normalize-vnode
-   [:div
-    :on-click "blah"
-    :z/class :none
-    "Something else"]))
-
-(defn- extract-tag-props "
-Given a normalized vnode, parses the ids and classes
-out of the tag and into the props, adding a `:z/sel`
-prop containing the original
-tag.
-" [[tag props body]]
-  (if-let [[_ type id classes] (re-matches #"^([^#.]+)([#][^.]+)?([.].+)?$" (name tag))] 
-    [(keyword (namespace tag) type)
-     (-> props
-         (assoc :z/sel tag)
-         (assoc :id (some-> id (subs 1)))
-         (assoc :z/class (->> [(some-> classes (str/split #"[.]")) (:z/class props)] flatten (remove str/blank?) not-empty)))
-     body]
-    (throw (ex-info "Invalid tag" {:tag tag}))))
-
-(comment
-  (extract-tag-props
-   [:div#my-thing.foo.bar {:z/class "something"} (list "body")]))
-
-(defn- preproc-vnode "
-Simplifies the vnode, parsing out the classes and id from
-the tag, and converting compound tags (i.e `[:div :span]`)
-into nested vnodes, and accumulating the whole body into
-one sequence.
-" [vnode]
-  (let [[tag-or-tags props body] (normalize-vnode vnode)]
-    (->
-     (cond
-       (keyword? tag-or-tags)
-       [tag-or-tags props body]
-       
-       (vector? tag-or-tags)
-       (case (count tag-or-tags)
-         0 (throw (ex-info "Invalid tag" {:tag tag-or-tags}))
-         1 [(first tag-or-tags) props body]
-         [(first tag-or-tags) (select-keys props [:z/key])
-          (list
-           (reduce
-            (fn [m middle-tag]
-              (extract-tag-props [middle-tag {} (list m)]))
-            (extract-tag-props [(last tag-or-tags) (dissoc props :z/key) body])
-            (-> tag-or-tags butlast rest)))]))
-     extract-tag-props)))
-
-(comment
-  (preproc-vnode
-   [[:div.foo :span#thing.bar :i]
-    :on-click :do-something
-    "The" "body"])
-  (preproc-vnode
-   [::foo :on-click "my-thing"]))
-
 
 (defn- css [s]
   (doto (js/CSSStyleSheet.) (.replaceSync s)))
@@ -221,20 +140,6 @@ one sequence.
                 (assoc diff key inner-diff)))))
         $ [:z/style :z/on :z/aria]))))
 
-(defn- ->css-value [x]
-  (cond
-    (or (keyword? x) (symbol? x))
-    (name x)
-
-    (vector? x)
-    (str/join " " (map ->css-value x))
-
-    (seq? x)
-    (str/join ", " (map ->css-value x))
-
-    :else
-    (str x)))
-
 (defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props]
   (let [old-props (gobj/get dom PROPS-SYM)
         diff (diff-props old-props props)
@@ -249,7 +154,7 @@ one sequence.
           (doseq [[k [_ new-val]] style-diff]
             (if-not new-val
               (.removeProperty style-obj (name k))
-              (.setProperty style-obj (name k) (->css-value new-val))))))
+              (.setProperty style-obj (name k) (clj->css-property new-val))))))
       (when-let [[_ css-prop] (get diff :z/css)]
         (set! (.-adoptedStyleSheets dom) (->> (conj css-prop host-css) (mapv ->stylesheet-object) to-array)))
       (when-let [listeners-diff (diff :z/on)]
@@ -271,9 +176,12 @@ one sequence.
                                               prop-value)]
                          (if-let [field-name (get fields-index prop-key)]
                            (gobj/set dom field-name adjusted-value)
-                           (if-not prop-value
-                             (.removeAttribute dom (name prop-key))
-                             (.setAttribute dom (name prop-key) (if (true? adjusted-value) "" (str adjusted-value)))))))
+                           (let [attr-name (name prop-key)
+                                 component-name (or ^Keyword (.-componentName dom) (-> dom .-nodeName str/lower-case keyword))
+                                 attr-value (when (some? adjusted-value) (config/write-attribute component-name attr-name adjusted-value))]
+                             (if (nil? attr-value)
+                               (.removeAttribute dom attr-name)
+                               (.setAttribute dom (name prop-key) attr-value))))))
             normal-props-diff (remove (comp namespace key) diff)]
         (doseq [[k [old-val new-val]] normal-props-diff]
           ;; when a binding expires
@@ -317,25 +225,23 @@ one sequence.
             (doseq [[k [_ new-val]] style-diff]
               (if-not new-val
                 (.removeProperty style-obj (name k))
-                (.setProperty style-obj (name k) (->css-value new-val))))))
+                (.setProperty style-obj (name k) (clj->css-property new-val))))))
         
         ;; patch classes
         (when-let [[_ class] (diff :z/class)]
           ;; setting className is faster than .setAttribute, but there
           ;; doesn't seem to be a way to remove the attribute this way,
           ;; so use .removeAttribute to remove it
-          (if (nil? class)
+          (cond
+            (nil? class)
             (.removeAttribute dom "class")
-            (set! (.-className dom) (str/join " " class))))
-        (gobj/set dom PROPS-SYM props)))))
 
-(defn- kw->el-name [tag]
-  (->
-   (if-let [ns (namespace tag)]
-     (str ns "-" (name tag))
-     (name tag))
-   (str/replace #"[^A-Za-z0-9._-]+" "-")
-   str/lower-case))
+            (coll? class)
+            (set! (.-className dom) (str/join " " class))
+
+            :else
+            (set! (.-className dom) (str class))))
+        (gobj/set dom PROPS-SYM props)))))
 
 (defn- cleanup-dom [^js/Node dom !instance-state]
   (doseq [[k v] (gobj/get dom PROPS-SYM)]
@@ -519,10 +425,12 @@ one sequence.
 (defn- normalize-prop-spec [prop-name prop-spec]
   (case prop-spec
     :attr {:attr (-> prop-name name base/snake-case)
-           :field (-> prop-name name base/cammel-case)
            :prop prop-name}
     :field {:field (-> prop-name name base/cammel-case)
             :prop prop-name}
+    :default {:field (-> prop-name name base/cammel-case)
+              :attr (-> prop-name name base/snake-case)
+              :prop prop-name}
     (cond
       (satisfies? IWatchable prop-spec)
       {:state-factory (constantly prop-spec) :prop prop-name}
@@ -593,7 +501,7 @@ one sequence.
   (let [^js proto (.-prototype class)
         !static-state (gobj/get class PRIVATE-SYM)
         props-map (cond
-                    (set? props) (->> props (map #(vector % :field)) (into {}))
+                    (set? props) (->> props (map #(vector % :default)) (into {}))
                     (map? props) props
                     (nil? props) {}
                     :else (throw (ex-info "Props must be either a map or a set" {:props props :component name})))
@@ -604,31 +512,39 @@ one sequence.
                               (when (and (:attr prop-spec) (nil? (:state-factory prop-spec)))
                                 [(:attr prop-spec) prop-spec])))
                           (into {}))
-        state-prop-specs (filter :state-factory normalized-prop-specs)
-        init-state-props (fn [^js/Node instance]
-                           (let [!instance-state (gobj/get instance PRIVATE-SYM)]
-                             (doseq [prop-spec state-prop-specs]
-                               (when-not (contains? (:props @!instance-state) (:prop prop-spec))
-                                 (try
-                                   (let [state ((:state-factory prop-spec) instance)
-                                         watch-key [::state-prop (:prop prop-spec) instance]
-                                         cleanup-fn (fn []
-                                                      (swap! !instance-state update :props dissoc (:prop prop-spec))
-                                                      (remove-watch state watch-key)
-                                                      (when-let [state-cleanup (:state-cleanup prop-spec)]
-                                                        (state-cleanup state instance)))]
-                                     (when-not (satisfies? IWatchable state)
-                                       (throw (ex-info "State factory produced something not watchable" {:state state :component name})))
-                                     (when (satisfies? IDeref state)
-                                       (swap! !instance-state update :props assoc (:prop prop-spec) @state))
-                                     (add-watch state watch-key
-                                       (fn [_ _ _ new-val]
-                                         (swap! !instance-state assoc-in [:props (:prop prop-spec)] new-val)
-                                         (when (:connected @!instance-state)
-                                           (request-render instance))))
-                                     (swap! !instance-state update :cleanup-fns (fnil conj #{}) cleanup-fn))
-                                   (catch :default e
-                                     (js/console.error "Error initializing state prop" e)))))))
+        init-props (fn [^js/Node instance]
+                     (let [!instance-state (gobj/get instance PRIVATE-SYM)]
+                       (doseq [prop-spec normalized-prop-specs
+                               :when (not (contains? (:props @!instance-state) (:prop prop-spec)))]
+                         (cond
+                           (:state-factory prop-spec)
+                           (try
+                             (let [state ((:state-factory prop-spec) instance)
+                                   watch-key [::state-prop (:prop prop-spec) instance]
+                                   cleanup-fn (fn []
+                                                (swap! !instance-state update :props dissoc (:prop prop-spec))
+                                                (remove-watch state watch-key)
+                                                (when-let [state-cleanup (:state-cleanup prop-spec)]
+                                                  (state-cleanup state instance)))]
+                               (when-not (satisfies? IWatchable state)
+                                 (throw (ex-info "State factory produced something not watchable" {:state state :component name})))
+                               (when (satisfies? IDeref state)
+                                 (swap! !instance-state update :props assoc (:prop prop-spec) @state))
+                               (add-watch state watch-key
+                                 (fn [_ _ _ new-val]
+                                   (swap! !instance-state assoc-in [:props (:prop prop-spec)] new-val)
+                                   (when (:connected @!instance-state)
+                                     (request-render instance))))
+                               (swap! !instance-state update :cleanup-fns (fnil conj #{}) cleanup-fn))
+                             (catch :default e
+                               (js/console.error "Error initializing state prop" e)))
+
+                           (:attr prop-spec)
+                           (swap! !instance-state assoc-in [:props (:prop prop-spec)]
+                             (some->> (.getAttribute instance (:attr prop-spec)) (config/read-attribute name (:attr prop-spec))))
+
+                           :else
+                           (swap! !instance-state assoc-in [:props (:prop prop-spec)] nil)))))
         default-css (cond-> [DEFAULT-CSS]
                       inherit-doc-css?
                       (into (->> (js/document.querySelectorAll "link[rel=\"stylesheet\"]")
@@ -656,7 +572,7 @@ one sequence.
                       !instance-state (gobj/get this PRIVATE-SYM)]
                   (swap! !static-state update :instances conj this)
                   (swap! !instance-state assoc :binds {})
-                  (init-state-props this)
+                  (init-props this)
                   (request-render this)))
               :configurable true}
           :disconnectedCallback
@@ -681,19 +597,12 @@ one sequence.
 
           :attributeChangedCallback
           #js{:value
-              (fn [name _old-val new-val]
+              (fn [attr-name _old-val new-val]
                 (let [^js/Node this (js* "this")
                       !instance-state (gobj/get this PRIVATE-SYM)]
-                  (when-let [prop-spec (get attr->prop-spec name)]
-                    (cond
-                      (nil? new-val)
-                      (swap! !instance-state update :props dissoc (:prop prop-spec))
-
-                      :else
-                      (let [final-val (if-let [mapper (:attr-mapper prop-spec)]
-                                        (mapper new-val)
-                                        new-val)]
-                        (swap! !instance-state assoc-in [:props (:prop prop-spec)] final-val)))
+                  (when-let [prop-spec (get attr->prop-spec attr-name)]
+                    (swap! !instance-state assoc-in [:props (:prop prop-spec)]
+                      (config/read-attribute name attr-name new-val))
                     (when (:connected @!instance-state)
                       (request-render this)))))
               :configurable true}})
@@ -709,12 +618,7 @@ one sequence.
               (js* "undefined")
               (fn [x]
                 (let [!instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))]
-                  (cond
-                    (js* "~{} === undefined" x)
-                    (swap! !instance-state update :props dissoc (:prop prop-spec))
-
-                    :else
-                    (swap! !instance-state assoc-in [:props (:prop prop-spec)] x))
+                  (swap! !instance-state assoc-in [:props (:prop prop-spec)] x)
                   (when (:connected @!instance-state)
                     (request-render (js* "this"))))))
             :configurable true}))
@@ -731,7 +635,7 @@ one sequence.
           :writable     false
           :configurable true})
     (doseq [instance (:instances @!static-state)]
-      (init-state-props instance)
+      (init-props instance)
       (request-render instance))))
 
 (defn component [{:keys [name props view focus] :as things}]
