@@ -65,7 +65,8 @@
                          (filter #(prop-writable? proto %))
                          (mapcat
                            (fn [prop-name]
-                             [[(keyword (base/snake-case prop-name)) prop-name]
+                             [[(keyword prop-name) prop-name]
+                              [(keyword (base/snake-case prop-name)) prop-name]
                               [(keyword (base/cammel-case prop-name)) prop-name]]))
                          (into {})
                          (merge (some-> parent-class class->fields-index)))]
@@ -365,7 +366,8 @@
                                    old-props (gobj/get child-dom PROPS-SYM)]
                                (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
                                  (patch-props child-dom !instance-state props)
-                                 (patch-children child-dom !instance-state body))
+                                 (when-not (:z/opaque? props)
+                                   (patch-children child-dom !instance-state body)))
                                child-dom)
 
                              :else
@@ -420,7 +422,8 @@
     (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
       (patch-root-props dom internals
         (update props :z/css #(cond (coll? %) (into default-css %) (some? %) (conj default-css %) :else default-css)))
-      (patch-children dom !instance-state body))))
+      (when-not (:z/opaque? props)
+        (patch-children dom !instance-state body)))))
 
 (defn- normalize-prop-spec [prop-name prop-spec]
   (case prop-spec
