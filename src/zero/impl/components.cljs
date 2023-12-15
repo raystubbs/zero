@@ -652,6 +652,8 @@
                                 }
                             })")]
         (gobj/set new-class PRIVATE-SYM (atom {:instances #{}}))
+        (when-let [ns (namespace name)]
+          (config/derive name (keyword ns "Component")))
         (js/Object.defineProperty (.-prototype new-class) "init"
           #js{:value
               (fn []

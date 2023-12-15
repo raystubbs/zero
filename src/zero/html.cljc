@@ -6,10 +6,17 @@
 
 (declare html)
 
+(def ^:private write-attribute-default-method (get-method zconfig/write-attribute :default))
+
 (defn- vnode->html [vnode]
   (cond
     (vector? vnode)
     (let [[tag props body] (preproc-vnode vnode)
+          write-attribute (if-let [ns (namespace tag)]
+                            (let [generic-method (get-method zconfig/write-attribute (keyword ns "Component"))]
+                              (if (not= generic-method write-attribute-default-method)
+                                generic-method
+                                (get-method zconfig/write-attribute tag))))
           html-attrs (reduce-kv
                        (fn [agg k v]
                          (cond
@@ -28,7 +35,7 @@
 
                            (and (some? v) (nil? (namespace k)))
                            (let [attr-name (name k)
-                                 attr-value (zconfig/write-attribute tag attr-name v)]
+                                 attr-value (write-attribute tag attr-name v)]
                              (cond-> agg
                                (some? attr-value)
                                (assoc (name k) attr-value)))

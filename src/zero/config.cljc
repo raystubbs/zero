@@ -44,15 +44,26 @@
            ;; TODO: others
            )))))
 
-(defmulti read-attribute (fn [component-name _attr-name _attr-value] (some-> component-name namespace keyword)))
+(def !h-components (atom (make-hierarchy)))
+
+(defmulti read-attribute
+  (fn [component-name _attr-name _attr-value]
+    component-name)
+  :hierarchy !h-components)
 
 (defmethod read-attribute :default [_component-name _attr-name attr-value]
   attr-value)
 
-(defmulti write-attribute (fn [component-name _attr-name _value] (some-> component-name namespace keyword)))
+(defmulti write-attribute
+  (fn [component-name _attr-name _value]
+    component-name)
+  :hierarchy !h-components)
 
 (defmethod write-attribute :default [_component-name _attr-name value]
   (cond
     (true? value) ""
     (false? value) nil
     :else (str value)))
+
+(defn derive [component-name parent]
+  (swap! !h-components clojure.core/derive component-name parent))

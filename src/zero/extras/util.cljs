@@ -1,5 +1,6 @@
 (ns zero.extras.util
   (:require
+    [clojure.string :as str]
     [zero.core :as z]))
 
 (z/reg-injector
@@ -89,3 +90,55 @@
     (add-watch !dep-vals [::watch key]
       (fn [_ _ _ new-val]
         (on-deps new-val)))))
+
+(defn css-selector [x]
+  (cond
+    (string? x)
+    x
+
+    (keyword? x)
+    (if-let [ns (namespace x)]
+      (str (str/replace ns #"[.]" "\\.") "-" (name x))
+      (name x))))
+
+(defprotocol IDisposable
+  (-dispose [disposable]))
+
+(defn slotted-elements-prop [& {:keys [selector slots]}]
+  (let [slotted-selector (some-> selector css-selector)
+        slot-selector (if slots (->> slots (map #(str "slot[name=\"" (name %) "\"]")) (str/join ",")) "slot")]
+    {:state-factory
+     (fn slotted-prop-state-factory [^js/HTMLElement dom]
+       (let [shadow (.-shadowRoot dom)
+             !slotted (atom nil)
+             update-slotted! (fn update-slotted! []
+                               (reset! !slotted
+                                 (set
+                                   (for [slot (array-seq (.querySelectorAll shadow slot-selector))
+                                         node (array-seq (.assignedNodes slot))
+                                         :when (or (nil? slotted-selector) (and (instance? js/HTMLElement node) (.matches node slotted-selector)))]
+                                     node))))
+             abort-controller (js/AbortController.)]
+         (update-slotted!)
+
+         (.addEventListener shadow "slotchange" update-slotted! #js{:signal (.-signal abort-controller)})
+         (.addEventListener shadow "render" update-slotted! #js{:signal (.-signal abort-controller)})
+
+         (reify
+           IDeref
+           (-deref [_]
+             @!slotted)
+
+           IWatchable
+           (-add-watch [_ k f]
+             (-add-watch !slotted k f))
+           (-remove-watch [_ k]
+             (-remove-watch !slotted k))
+
+           IDispose
+           (-dispose [_]
+             (.abort abort-controller)))))
+
+     :state-cleanup
+     (fn slotted-prop-state-cleanup [state _]
+       (-dispose state))}))
