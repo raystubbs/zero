@@ -58,11 +58,11 @@
     (super-paths path)
     (watched-sub-paths path)))
 
-(defn- apply-patch [db patch]
+(defn apply-patch [m patch]
   (reduce
-    (fn [[db-agg affected-paths-agg] {:keys [path fnil] :as patch-entry}]
+    (fn [[m-agg affected-paths-agg] {:keys [path fnil] :as patch-entry}]
       (let [path (vec path)
-            orig-target-val (get-in db-agg path)
+            orig-target-val (get-in m-agg path)
             fnil-target-val (if (nil? orig-target-val) fnil orig-target-val)
             
             [new-target-val new-affected-paths]
@@ -75,6 +75,7 @@
               [(merge fnil-target-val (:merge patch-entry))
                (concat
                  (super-paths path)
+                 [path]
                  (mapcat #(watched-sub-paths (conj path %)) (keys (:merge patch-entry))))]
 
               (coll? (:clear patch-entry))
@@ -89,6 +90,7 @@
                    (seq (:clear patch-entry))
                    (concat
                      (super-paths path)
+                     [path]
                      (mapcat #(watched-sub-paths (conj path %)) (:clear patch-entry)))
 
                    (not= orig-target-val fnil-target-val)
@@ -118,6 +120,7 @@
                      (seq to-clear)
                      (concat
                        (super-paths path)
+                       [path]
                        (mapcat #(watched-sub-paths (conj path %)) to-clear))
 
                      (not= orig-target-val fnil-target-val)
@@ -149,9 +152,9 @@
                (paths-affected-by-change-to path)])]
         [(if (empty? path)
            new-target-val
-           (assoc-in db-agg path new-target-val))
+           (assoc-in m-agg path new-target-val))
          (into affected-paths-agg new-affected-paths)]))
-    [db #{}]
+    [m #{}]
     patch))
 
 (defn patch! [patch]

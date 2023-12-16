@@ -57,7 +57,7 @@
           should-log? (and DEBUG log?)
           actually-perform! (fn actually-perform! []
                               (when should-log?
-                                (js/console.groupCollapsed this)
+                                (js/console.groupCollapsed (pr-str this))
                                 (js/console.info :context context))
                               (let [!errors (atom [])]
                                 (doseq [effect (apply-injections (.-effects this) context)]

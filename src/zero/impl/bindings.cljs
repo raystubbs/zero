@@ -27,8 +27,8 @@
               {:stream stream-ident}
               e)))))))
 
-(defn- boot-stream [[stream-key args :as stream-ident] new-watch]
-  (swap! !stream-states assoc stream-ident {:watches (conj {} new-watch)})
+(defn- boot-stream [[stream-key args :as stream-ident]]
+  (swap! !stream-states assoc stream-ident {:watches {}})
   (let [stream-fn (or (get @!stream-fns stream-key) (throw (ex-info "No stream registered for key" {:stream-key stream-key})))
         kill-fn (apply stream-fn (rx-fn stream-ident) (apply-injections args {}))]
     (swap! !stream-states assoc-in [stream-ident :kill-fn] kill-fn)
@@ -46,9 +46,9 @@
                        (fn [ref key old-val new-val]
                          (f ref key old-val (if (nil? new-val) (:default props) new-val)))
                        f)]
-      (if (nil? (get @!stream-states [stream-key args]))
-        (boot-stream [stream-key args] [[this key] actual-fun])
-        (swap! !stream-states assoc-in [[stream-key args] :watches [this key]] actual-fun))))
+      (when (nil? (get @!stream-states [stream-key args]))
+        (boot-stream [stream-key args]))
+      (swap! !stream-states assoc-in [[stream-key args] :watches [this key]] actual-fun)))
   (-remove-watch [this key]
     (let [old-watches (get-in @!stream-states [[stream-key args] :watches])
           new-watches (dissoc old-watches [this key])]

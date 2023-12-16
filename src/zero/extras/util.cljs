@@ -47,20 +47,22 @@
 (defn derived [f & deps]
   (fn [rx & args]
     (let [watch-id (random-uuid)
-          !dep-vals (atom (mapv #(when (satisfies? IDeref %) (deref %)) deps))
+          !dep-vals (atom nil)
           on-deps (fn [dep-vals]
                     (try
                       (rx (apply f dep-vals args))
                       (catch :default e
                         (js/console.error e))))]
-      (on-deps @!dep-vals)
-      (add-watch !dep-vals watch-id
-        (fn [_ _ _ new-val]
-          (on-deps new-val)))
       (doseq [[idx dep] (map-indexed vector deps)]
         (add-watch dep watch-id
           (fn [_ _ _ new-val]
             (swap! !dep-vals assoc idx new-val))))
+
+      (reset! !dep-vals (mapv #(when (satisfies? IDeref %) (deref %)) deps))
+      (on-deps @!dep-vals)
+      (add-watch !dep-vals watch-id
+        (fn [_ _ _ new-val]
+          (on-deps new-val)))
 
       (fn cleanup-derived []
         (doseq [dep deps]
@@ -77,7 +79,7 @@
 (defn watch [key f & deps]
   (unwatch key)
   (swap! !watch-deps assoc key deps)
-  (let [!dep-vals (atom (mapv #(when (satisfies? IDeref %) (deref %)) deps))
+  (let [!dep-vals (atom nil)
         on-deps (fn [dep-vals]
                   (try
                     (apply f dep-vals)
@@ -87,6 +89,8 @@
       (add-watch dep [::watch key]
         (fn [_ _ _ new-val]
           (swap! !dep-vals assoc idx new-val))))
+
+    (reset! !dep-vals (mapv #(when (satisfies? IDeref %) (deref %)) deps))
     (add-watch !dep-vals [::watch key]
       (fn [_ _ _ new-val]
         (on-deps new-val)))))
@@ -112,17 +116,18 @@
        (let [shadow (.-shadowRoot dom)
              !slotted (atom nil)
              update-slotted! (fn update-slotted! []
-                               (reset! !slotted
-                                 (set
-                                   (for [slot (array-seq (.querySelectorAll shadow slot-selector))
-                                         node (array-seq (.assignedNodes slot))
-                                         :when (or (nil? slotted-selector) (and (instance? js/HTMLElement node) (.matches node slotted-selector)))]
-                                     node))))
+                               (let [now-slotted (set
+                                                   (for [slot (array-seq (.querySelectorAll shadow slot-selector))
+                                                         node (array-seq (.assignedNodes slot))
+                                                         :when (or (nil? slotted-selector) (and (instance? js/HTMLElement node) (.matches node slotted-selector)))]
+                                                     node))]
+                                 (when (not= now-slotted @!slotted)
+                                   (reset! !slotted now-slotted))))
              abort-controller (js/AbortController.)]
          (update-slotted!)
 
          (.addEventListener shadow "slotchange" update-slotted! #js{:signal (.-signal abort-controller)})
-         (.addEventListener shadow "render" update-slotted! #js{:signal (.-signal abort-controller)})
+         #_(.addEventListener shadow "render" update-slotted! #js{:signal (.-signal abort-controller)})
 
          (reify
            IDeref
@@ -135,7 +140,7 @@
            (-remove-watch [_ k]
              (-remove-watch !slotted k))
 
-           IDispose
+           IDisposable
            (-dispose [_]
              (.abort abort-controller)))))
 

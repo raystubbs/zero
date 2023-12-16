@@ -1,11 +1,12 @@
 (ns zero.impl.components
   (:require
-   [zero.impl.base :as base]
-   [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
-   [zero.config :as config]
-   [clojure.string :as str]
-   [goog.object :as gobj]
-   [goog :refer [DEBUG]]))
+    [clojure.set :as set]
+    [zero.impl.base :as base]
+    [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
+    [zero.config :as config]
+    [clojure.string :as str]
+    [goog.object :as gobj]
+    [goog :refer [DEBUG]]))
 
 ;; generic unique id seq
 (defonce ^:private uid-seq (atom (js/BigInt 0)))
@@ -17,7 +18,6 @@
   (doto (js/CSSStyleSheet.) (.replaceSync s)))
 
 (defonce ^:private PROPS-SYM (js/Symbol "zProps"))
-(defonce ^:private CHILDREN-SYM (js/Symbol "zChildren"))
 (defonce ^:private LISTENER-ABORT-CONTROLLERS-SYM (js/Symbol "zListenerAbortControllers"))
 (defonce ^:private MARK-SYM (js/Symbol "zMark"))
 (defonce ^:private HTML-NS "http://www.w3.org/1999/xhtml")
@@ -204,18 +204,20 @@
             (if-let [existing (get-in @!instance-state [:binds new-val])]
               (do
                 (swap! !instance-state update-in [:binds new-val :binders] conj [dom k])
-                (set-prop dom k @(:current existing)))
-              (let [watch-uid (gen-uid)
-                    !current (atom (if (satisfies? IDeref new-val) (deref new-val) nil))
-                    binders #{[dom k]}]
+                (set-prop dom k (:current existing)))
+              (let [watch-uid (gen-uid)]
                 (add-watch
                   new-val watch-uid
                   (fn [_ _ _ x]
-                    (reset! !current x)
+                    (swap! !instance-state assoc-in [:binds new-val :current] x)
                     (doseq [[binder-dom binder-prop] (get-in @!instance-state [:binds new-val :binders])]
                       (set-prop binder-dom binder-prop x))))
-                (swap! !instance-state assoc-in [:binds new-val] {:uid watch-uid :current !current :binders binders})
-                (set-prop dom k @!current)))
+                ;; deref must be done _after_ add-watch to ensure that, if `new-val` is
+                ;; a binding, the underlying data stream has been booted up
+                (let [current (when (satisfies? IDeref new-val) @new-val)]
+                  (swap! !instance-state assoc-in [:binds new-val]
+                    {:uid watch-uid :current current :binders #{[dom k]}})
+                  (set-prop dom k current))))
 
             :else
             (set-prop dom k new-val)))
@@ -244,88 +246,78 @@
             (set! (.-className dom) (str class))))
         (gobj/set dom PROPS-SYM props)))))
 
-(defn- cleanup-dom [^js/Node dom !instance-state]
-  (doseq [[k v] (gobj/get dom PROPS-SYM)]
-    (when (and v (not (namespace k)))
-      (when (satisfies? IWatchable v)
-        (let [binders (disj (get-in @!instance-state [:binds v :binders]) [dom k])]
-          (cond
-            (empty? binders)
-            (do
-              (remove-watch v (get @!instance-state [:binds v :uid]))
-              (swap! !instance-state update :binds dissoc v))
-            
-            :else
-            (swap! !instance-state assoc-in [:binds v :binders] binders))))))
-  (doseq [child-dom (gobj/get dom CHILDREN-SYM)]
-    (cleanup-dom child-dom !instance-state))
+(defn- prepare-dom-to-be-detached [^js/Node dom !instance-state]
+  ;; replace all bindings with their current value
+  (gobj/set dom PROPS-SYM
+    (persistent!
+      (reduce-kv
+        (fn [new-props k v]
+          (if (or (not (satisfies? IWatchable v)) (some? (namespace k)))
+            new-props
+            (let [current (get-in @!instance-state [:binds v :current])
+                  binders (disj (get-in @!instance-state [:binds v :binders]) [dom k])]
+              (cond
+                (empty? binders)
+                (do
+                  (remove-watch v (get @!instance-state [:binds v :uid]))
+                  (swap! !instance-state update :binds dissoc v))
+
+                :else
+                (swap! !instance-state assoc-in [:binds v :binders] binders))
+              (assoc! new-props k current))))
+        (transient (or (gobj/get dom PROPS-SYM) {}))
+        (gobj/get dom PROPS-SYM))))
+  (doseq [child-dom (-> dom .-childNodes array-seq)]
+    (prepare-dom-to-be-detached child-dom !instance-state))
   (when (and DEBUG (= (.-nodeName dom) "LINK"))
     (swap! !css-links disj dom)))
 
-(defn- calc-child-dom-changes [source-dom-seq target-dom-seq inserted]
+(defn insert-child! [^js/Node dom ^js/Node reference ^js/Node child]
   (cond
-    (empty? source-dom-seq)
-    (if (seq target-dom-seq)
-      [{:op :insert :doms target-dom-seq}]
-      [])
+    (nil? reference)
+    (if (fn? (.-prepend dom))
+      (.prepend dom child)
+      (if-let [first-child (.-firstChild dom)]
+        (.insertBefore dom child first-child)
+        (.appendChild dom child)))
 
-    (empty? target-dom-seq)
-    [{:op :remove :doms (remove inserted source-dom-seq)}]
-
-    (= (first source-dom-seq) (first target-dom-seq))
-    (let [same-count (->> (map vector source-dom-seq target-dom-seq)
-                       (take-while (fn [[s t]] (= s t)))
-                       count)
-          remaining-source-doms (drop same-count source-dom-seq)
-          remaining-target-doms (drop same-count target-dom-seq)]
-      (into
-        (if (or (seq remaining-source-doms) (seq remaining-target-doms))
-          [{:op :skip :count same-count}]
-          [])
-        (calc-child-dom-changes remaining-source-doms remaining-target-doms inserted)))
-
-    (contains? inserted (first source-dom-seq))
-    (calc-child-dom-changes (drop-while inserted source-dom-seq) target-dom-seq inserted)
+    (fn? (.-after reference))
+    (.after reference child)
 
     :else
-    (let [not-same-count (->> (map vector source-dom-seq target-dom-seq)
-                           (take-while (fn [[s t]] (not= s t)))
-                           count)
-          [to-insert remaining] (split-at not-same-count target-dom-seq)]
-      (into [{:op :insert :doms to-insert}]
-        (calc-child-dom-changes source-dom-seq remaining (into inserted to-insert))))))
+    (if-let [next-child (.-nextSibling reference)]
+      (.insertBefore dom child next-child)
+      (.appendChild dom child))))
 
-(defn- apply-dom-changes [^js/Node dom ^js/Node start-child changes !instance-state]
-  (let [!cursor (atom start-child)]
-    (doseq [{:keys [op] :as change} changes]
-      (case op
-        :skip
-        (dotimes [_ (:count change)]
-          (swap! !cursor #(some-> % .-nextSibling)))
-
-        :insert
+(defn- apply-layout-changes [^js/Node dom start-index stop-index child-dom->source-index target-layout]
+  (loop [boundary-index (dec start-index)
+         next-target-index start-index]
+    (if (<= stop-index next-target-index)
+      nil
+      (let [next-child-dom (get target-layout next-target-index)
+            next-source-index (get child-dom->source-index next-child-dom)
+            boundary-dom (get target-layout boundary-index)]
         (cond
-          (nil? @!cursor)
+          ;; new child, just insert it in the right place
+          (nil? next-source-index)
           (do
-            (.apply (.-append dom) dom (to-array (:doms change)))
-            (reset! !cursor (.-lastChild dom)))
+            (insert-child! dom boundary-dom next-child-dom)
+            (recur next-target-index (inc next-target-index)))
 
-          (.-before @!cursor)
-          (do
-            (.apply (.-before @!cursor) @!cursor (to-array (:doms change))))
+          ;; It's a pivot node if it's only been shifted by 1 in either direction,
+          ;; and its new index doesn't cross (is greater than) boundary-index.  Pivots
+          ;; are considered 'stable', we don't move them, instead everything else moves
+          ;; around them.
+          (and (< boundary-index next-target-index) (<= (dec next-source-index) next-target-index (inc next-source-index)))
+          (recur next-target-index (inc next-target-index))
 
           :else
-          (doseq [dom-to-insert (:doms change)]
-            (.insertBefore @!cursor dom-to-insert)))
-
-        :remove
-        (doseq [dom-to-remove (:doms change)]
-          (.removeChild dom dom-to-remove)
-          (cleanup-dom dom-to-remove !instance-state))))))
+          (do
+            (insert-child! dom boundary-dom next-child-dom)
+            (recur boundary-index (inc next-target-index))))))))
 
 (defn- patch-children [^js/Node dom !instance-state children]
-  (let [old-child-doms (or (gobj/get dom CHILDREN-SYM) [])
-
+  (let [source-layout (-> dom .-childNodes array-seq vec)
         !child-doms (atom
                      (group-by
                       (fn [child-dom]
@@ -333,7 +325,7 @@
                           :text
                           (let [props (gobj/get child-dom PROPS-SYM)]
                             [(:z/sel props) (:z/key props)])))
-                      old-child-doms))
+                      source-layout))
 
         take-el-dom (fn [tag props]
                       (let [matcher [(:z/sel props) (:z/key props)]
@@ -357,54 +349,49 @@
                             existing)
                           (js/document.createTextNode "")))
 
-        new-child-doms (mapv
-                         (fn process-children [vnode]
-                           (cond
-                             (vector? vnode)
-                             (let [[tag props body] (preproc-vnode vnode)
-                                   child-dom (take-el-dom tag props)
-                                   old-props (gobj/get child-dom PROPS-SYM)]
-                               (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
-                                 (patch-props child-dom !instance-state props)
-                                 (when-not (:z/opaque? props)
-                                   (patch-children child-dom !instance-state body)))
-                               child-dom)
+        target-layout (mapv
+                        (fn process-children [vnode]
+                          (cond
+                            (vector? vnode)
+                            (let [[tag props body] (preproc-vnode vnode)
+                                  child-dom (take-el-dom tag props)
+                                  old-props (gobj/get child-dom PROPS-SYM)]
+                              (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
+                                (patch-props child-dom !instance-state props)
+                                (when-not (:z/opaque? props)
+                                  (patch-children child-dom !instance-state body)))
+                              child-dom)
 
-                             :else
-                             (let [child-dom (take-text-dom)]
-                               (set! (.-nodeValue child-dom) (str vnode))
-                               child-dom)))
-                         children)
+                            :else
+                            (let [child-dom (take-text-dom)]
+                              (set! (.-nodeValue child-dom) (str vnode))
+                              child-dom)))
+                        children)
 
         focused-doms (:doms-on-focus-path @!instance-state)
-        index-of-focused-child-in-new (when (seq focused-doms) (base/index-of (partial contains? focused-doms) new-child-doms))]
+        index-of-focused-child-in-target (when (seq focused-doms) (base/index-of (partial contains? focused-doms) target-layout))
+        child-dom->source-index (set/map-invert source-layout)
+        preserved-child-doms (set target-layout)]
 
-    ;; keep track of <link> elements so we can make them
-    ;; react to hot reloads
+    ;; keep track of <link> elements, so we can make them react to hot reloads
     (when DEBUG
-      (doseq [child-dom new-child-doms
+      (doseq [child-dom target-layout
               :when (and
                       (= (.-nodeName child-dom) "LINK")
                       (contains? #{"stylesheet" "preload"} (.-rel child-dom)))]
         (swap! !css-links conj child-dom)))
 
-    ;; apply changes
-    (if (nil? index-of-focused-child-in-new)
-      (apply-dom-changes dom (.-firstChild dom) (calc-child-dom-changes old-child-doms new-child-doms #{}) !instance-state)
-      (let [focused-child-dom (get new-child-doms index-of-focused-child-in-new)
-            index-of-focused-child-in-old (or (base/index-of (partial = focused-child-dom) old-child-doms) (count old-child-doms))
-            changes-before-focused-dom (calc-child-dom-changes
-                                         (subvec old-child-doms 0 index-of-focused-child-in-old)
-                                         (subvec new-child-doms 0 index-of-focused-child-in-new)
-                                         #{})
-            changes-after-focused-dom (calc-child-dom-changes
-                                        (subvec old-child-doms (inc index-of-focused-child-in-old))
-                                        (subvec new-child-doms (inc index-of-focused-child-in-new))
-                                        #{})]
-        (apply-dom-changes dom (.-firstChild dom) changes-before-focused-dom !instance-state)
-        (apply-dom-changes dom (.-nextSibling focused-child-dom) changes-after-focused-dom !instance-state)))
+    ;; apply layout changes
+    (if (nil? index-of-focused-child-in-target)
+      (apply-layout-changes dom 0 (count target-layout) child-dom->source-index target-layout)
+      (do
+        (apply-layout-changes dom 0 index-of-focused-child-in-target child-dom->source-index target-layout)
+        (apply-layout-changes dom (inc index-of-focused-child-in-target) (count target-layout) child-dom->source-index target-layout)))
 
-    (gobj/set dom CHILDREN-SYM new-child-doms)))
+    ;; remove expired children
+    (doseq [child-dom source-layout :when (not (contains? preserved-child-doms child-dom))]
+      (.removeChild dom child-dom)
+      (prepare-dom-to-be-detached child-dom !instance-state))))
 
 (defn- render [^js/ShadowRoot dom ^js/ElementInternals internals !instance-state vnode]
   (let [!static-state (-> dom .-host .-constructor (gobj/get PRIVATE-SYM))
@@ -531,13 +518,13 @@
                                                   (state-cleanup state instance)))]
                                (when-not (satisfies? IWatchable state)
                                  (throw (ex-info "State factory produced something not watchable" {:state state :component name})))
-                               (when (satisfies? IDeref state)
-                                 (swap! !instance-state update :props assoc (:prop prop-spec) @state))
                                (add-watch state watch-key
                                  (fn [_ _ _ new-val]
                                    (swap! !instance-state assoc-in [:props (:prop prop-spec)] new-val)
                                    (when (:connected @!instance-state)
                                      (request-render instance))))
+                               (when (satisfies? IDeref state)
+                                 (swap! !instance-state update :props assoc (:prop prop-spec) @state))
                                (swap! !instance-state update :cleanup-fns (fnil conj #{}) cleanup-fn))
                              (catch :default e
                                (js/console.error "Error initializing state prop" e)))
@@ -592,9 +579,8 @@
                   (doseq [cleanup-fn (:cleanup-fns @!instance-state)]
                     (cleanup-fn))
                   (swap! !instance-state assoc :cleanup-fns #{})
-                  (doseq [^js/Node child-dom (gobj/get shadow CHILDREN-SYM)]
-                    (cleanup-dom child-dom !instance-state)
-                    (.remove child-dom))
+                  (doseq [^js/Node child-dom (-> shadow .-childNodes array-seq)]
+                    (prepare-dom-to-be-detached child-dom !instance-state))
                   (assert (= {} (:binds @!instance-state)))))
               :configurable true}
 
@@ -609,21 +595,23 @@
                     (when (:connected @!instance-state)
                       (request-render this)))))
               :configurable true}})
-    (doseq [prop-spec (filter :field normalized-prop-specs)]
+    (doseq [prop-spec (filter :field normalized-prop-specs)
+            :let [prop-name (:prop prop-spec)]]
       (js/Object.defineProperty
         proto
         (:field prop-spec)
         #js{:get
             (fn []
-              (-> (js* "this") (gobj/get PRIVATE-SYM) .-props (get (:prop prop-spec))))
+              (-> (js* "this") (gobj/get PRIVATE-SYM) deref :props (get prop-name)))
             :set
             (if (:state-factory prop-spec)
               (js* "undefined")
               (fn [x]
                 (let [!instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))]
-                  (swap! !instance-state assoc-in [:props (:prop prop-spec)] x)
-                  (when (:connected @!instance-state)
-                    (request-render (js* "this"))))))
+                  (when-not (identical? x (get-in @!instance-state [:props prop-name]))
+                    (swap! !instance-state assoc-in [:props prop-name] x)
+                    (when (:connected @!instance-state)
+                      (request-render (js* "this")))))))
             :configurable true}))
     (js/Object.defineProperty
       proto
