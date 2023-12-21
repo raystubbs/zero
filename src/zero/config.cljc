@@ -44,7 +44,7 @@
            ;; TODO: others
            )))))
 
-(def !h-components (atom (make-hierarchy)))
+(defonce !h-components (atom (make-hierarchy)))
 
 (defmulti read-attribute
   (fn [component-name _attr-name _attr-value]
@@ -67,3 +67,17 @@
 
 (defn derive [component-name parent]
   (swap! !h-components clojure.core/derive component-name parent))
+
+(defonce ^:private !registry (atom {}))
+
+(defn reg-effects [& {:as effect-specs}]
+  (swap! !registry update :effect-handlers (fnil into {}) effect-specs))
+
+(defn reg-streams [& {:as stream-specs}]
+  (swap! !registry update :stream-handlers (fnil into {}) stream-specs))
+
+(defn reg-injections [& {:as injection-specs}]
+  (swap! !registry update :injection-handlers (fnil into {}) injection-specs))
+
+(defn reg-components [& {:as component-specs}]
+  (swap! !registry update :components (fnil into {}) component-specs))

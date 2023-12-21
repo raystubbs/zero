@@ -191,7 +191,7 @@
               (cond
                 (empty? binders)
                 (do
-                  (remove-watch old-val (get @!instance-state [:binds old-val :uid]))
+                  (remove-watch old-val (get-in @!instance-state [:binds old-val :uid]))
                   (swap! !instance-state update :binds dissoc old-val))
                 
                 :else
@@ -259,7 +259,7 @@
               (cond
                 (empty? binders)
                 (do
-                  (remove-watch v (get @!instance-state [:binds v :uid]))
+                  (remove-watch v (get-in @!instance-state [:binds v :uid]))
                   (swap! !instance-state update :binds dissoc v))
 
                 :else
@@ -487,14 +487,14 @@
   (when-not @!render-frame-id
     (reset! !render-frame-id (js/requestAnimationFrame do-render))))
 
-(defn- patch-el-class [class {:keys [props view focus name inherit-doc-css?]}]
+(defn- patch-el-class [class component-name {:keys [props view focus inherit-doc-css?]}]
   (let [^js proto (.-prototype class)
         !static-state (gobj/get class PRIVATE-SYM)
         props-map (cond
                     (set? props) (->> props (map #(vector % :default)) (into {}))
                     (map? props) props
                     (nil? props) {}
-                    :else (throw (ex-info "Props must be either a map or a set" {:props props :component name})))
+                    :else (throw (ex-info "Props must be either a map or a set" {:props props :component component-name})))
         normalized-prop-specs (keep #(normalize-prop-spec (key %) (val %)) props-map)
         attr->prop-spec (->> normalized-prop-specs
                           (keep
@@ -517,7 +517,7 @@
                                                 (when-let [state-cleanup (:state-cleanup prop-spec)]
                                                   (state-cleanup state instance)))]
                                (when-not (satisfies? IWatchable state)
-                                 (throw (ex-info "State factory produced something not watchable" {:state state :component name})))
+                                 (throw (ex-info "State factory produced something not watchable" {:state state :component component-name})))
                                (add-watch state watch-key
                                  (fn [_ _ _ new-val]
                                    (swap! !instance-state assoc-in [:props (:prop prop-spec)] new-val)
@@ -531,7 +531,7 @@
 
                            (:attr prop-spec)
                            (swap! !instance-state assoc-in [:props (:prop prop-spec)]
-                             (some->> (.getAttribute instance (:attr prop-spec)) (config/read-attribute name (:attr prop-spec))))
+                             (some->> (.getAttribute instance (:attr prop-spec)) (config/read-attribute component-name (:attr prop-spec))))
 
                            :else
                            (swap! !instance-state assoc-in [:props (:prop prop-spec)] nil)))))
@@ -542,7 +542,7 @@
                               (map (fn [^js link-dom] (.getAttribute link-dom "href")))
                               (remove str/blank?)
                               (mapv ->stylesheet-object))))]
-    (swap! !static-state merge {:view view :focus focus :name name :default-css default-css})
+    (swap! !static-state merge {:view view :focus focus :name component-name :default-css default-css})
     
     ;; If this component's fields have been indexed,
     ;; remove it from the index since its fields may have changed
@@ -591,7 +591,7 @@
                       !instance-state (gobj/get this PRIVATE-SYM)]
                   (when-let [prop-spec (get attr->prop-spec attr-name)]
                     (swap! !instance-state assoc-in [:props (:prop prop-spec)]
-                      (config/read-attribute name attr-name new-val))
+                      (config/read-attribute component-name attr-name new-val))
                     (when (:connected @!instance-state)
                       (request-render this)))))
               :configurable true}})
@@ -616,23 +616,23 @@
     (js/Object.defineProperty
       proto
       "elementName"
-      #js{:value        (kw->el-name name)
+      #js{:value        (kw->el-name component-name)
           :writable     false
           :configurable true})
     (js/Object.defineProperty
       proto
       "componentName"
-      #js{:value        name
+      #js{:value        component-name
           :writable     false
           :configurable true})
     (doseq [instance (:instances @!static-state)]
       (init-props instance)
       (request-render instance))))
 
-(defn component [{:keys [name props view focus] :as things}]
-  (let [el-name (kw->el-name name)]
+(defn update-component [component-name {:keys [props view focus derive] :as things}]
+  (let [el-name (kw->el-name component-name)]
     (if-let [existing (js/customElements.get el-name)]
-      (patch-el-class existing things)
+      (patch-el-class existing component-name things)
       (let [new-class (js* "(class extends HTMLElement {
                                 constructor() {
                                     super();
@@ -640,8 +640,8 @@
                                 }
                             })")]
         (gobj/set new-class PRIVATE-SYM (atom {:instances #{}}))
-        (when-let [ns (namespace name)]
-          (config/derive name (keyword ns "Component")))
+        (when-let [ns (namespace component-name)]
+          (config/derive component-name (or derive (keyword ns "Component"))))
         (js/Object.defineProperty (.-prototype new-class) "init"
           #js{:value
               (fn []
@@ -690,12 +690,18 @@
                               :writable     false}}))))
               :configurable false
               :writable     false})
-        (patch-el-class new-class things)
+        (patch-el-class new-class component-name things)
         (js/customElements.define el-name new-class))))
   nil)
 
-(defn component-name [k]
-  (kw->el-name k))
+(defn update-components! [{old-components :components} {new-components :components}]
+  (when-not (identical? old-components new-components)
+    (doseq [[component-name component-spec :as new-component-entry] new-components
+            :when (not= new-component-entry (find old-components component-name))]
+      (update-component component-name component-spec))))
+
+(add-watch config/!registry ::update-components #(update-components! %3 %4))
+(update-components! {} @config/!registry)
 
 (defonce ^:private
   _only-do-this-once

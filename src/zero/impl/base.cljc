@@ -27,3 +27,12 @@
       (fn [idx v] (when (pred v) idx))
       coll)
     first))
+
+(defn log! [level & items]
+  #?(:cljs (case level
+             :error (apply js/console.error items)
+             :info (apply js/console.info items)
+             :debug (apply js/console.debug items))
+     :clj  (do
+             ;; FIXME: how should this be handled?  Maybe something in zero.config?
+             (print (-> level name str/upper-case) " " (str/join " " items)))))
