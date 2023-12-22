@@ -1,9 +1,16 @@
 (ns zero.core
   (:require
-   [zero.impl.actions :as act]
-   [zero.impl.bindings :as bnd]
-   [zero.impl.components :as c]
-   [zero.impl.injection :as inj]))
+   [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
+   [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
+   [zero.impl.injection #?@(:cljs [:refer [Injection]])]
+   [zero.impl.markup :as markup]
+   #?(:cljs [zero.impl.components])
+   [zero.config :as config])
+  #?(:clj
+     (:import
+       (zero.impl.actions Action)
+       (zero.impl.bindings Binding)
+       (zero.impl.injection Injection))))
 
 (defn act "
 Construct an action.
@@ -18,15 +25,15 @@ Construct an action.
 
 An action is a representation of a collection of
 effects as data.  Actions can be called, and expect
-a `js/Event` as input.  Actions can be compared, hashed,
-printed, etc. as data.
+a `js/Event` or context map as input.  Actions can be compared, hashed,
+printed, etc. They're values.
 " [& things]
   (let [[props effects] (if (map? (first things))
                           [(first things) (rest things)]
                           [{} things])]
-    (zero.impl.actions/Action. props (filterv some? effects))))
+    (Action. props (filterv some? effects))))
 
-(defn reg-effect "
+(def ^:deprecated reg-effect "
 Register one or more effects.
 
 ```clojure
@@ -41,9 +48,7 @@ Register one or more effects.
 
 (act ::echo \"Hello, World!\")
 ```
-" [& {:as effect-specs}]
-  (doseq [[effect-key effect-fn] effect-specs]
-    (act/reg-effect effect-key effect-fn)))
+" config/reg-effects)
 
 (defn bnd "
 Construct a binding.
@@ -62,9 +67,9 @@ printed, etc. as data.
   (let [[props stream-key args] (if (map? (first things))
                                    [(first things) (second things) (nthrest things 2)]
                                    [{} (first things) (rest things)])]
-    (zero.impl.bindings/Binding. props stream-key (vec args))))
+    (Binding. props stream-key (vec args))))
 
-(defn reg-stream "
+(def ^:deprecated reg-stream "
 Register one or more data streams.
 
 ```clojure
@@ -87,12 +92,10 @@ Each pair of `[stream-key args]` represents a unique
 stream instance, so the method will be called only once
 for each set of args used with the stream; until the
 stream has been spun down and must be restarted.
-" [& {:as stream-specs}]
-  (doseq [[stream-key stream-fn] stream-specs]
-    (bnd/reg-stream stream-key stream-fn)))
+" config/reg-streams)
 
 (defn << "
-Used to indicate an injection point in actions or bindings.
+Indicates an injection point in actions or bindings.
 ```clojure
   (act :do-something (<< :inject-some-data))
   (bnd :something (<< :inject-some-data))
@@ -103,9 +106,9 @@ Used to indicate an injection point in actions or bindings.
     \"Some data\"))
 ```
 " [injector-key & args]
-  (zero.impl.injection/Injection. injector-key args))
+  (Injection. injector-key args))
 
-(defn reg-injector "
+(def ^:deprecated reg-injector "
 Register one or more data injectors.
 ```clojure
 (reg-injector
@@ -118,11 +121,10 @@ Register one or more data injectors.
 When dispatched from an action, injectors will receive
 an `event` context value containing captured fields from
 the original event.
-" [& {:as injector-specs}]
-  (doseq [[injector-key injector-fn] injector-specs]
-    (inj/reg-injector injector-key injector-fn)))
+" config/reg-injections)
 
-(defn component "
+#?(:cljs
+   (defn ^:deprecated component "
 Create a component.
 
 ```clojure
@@ -147,15 +149,22 @@ done with an `attr-mapper` function like so:
 ```clojure
 :props {:foo {:attr \"foo\" :field \"foo\" :attr-mapper js/parseInt}}
 ```
-" [&{:keys [name props view focus] :as things}]
-  (c/component things))
+" [& {:keys [name props view focus] :as things}]
+     (config/reg-components (:name things) things)))
 
-(defn component-name "
+(defn ^:deprecated component-name "
 The custom element name that will be generated for a given
 keyword.
 "[kw]
-  (c/component-name kw))
+  (markup/kw->el-name kw))
 
-(defn do-effects! [& effects]
-  (doseq [effect effects]
-    (act/do-effect! effect)))
+(defn element-name "
+Given a keyword, returns the custom element name that'll be generated
+for a component with this name.
+" [kw]
+  (markup/kw->el-name kw))
+
+#?(:cljs
+   (defn ^:deprecated do-effects! [& effects]
+     (doseq [effect effects]
+       (act/do-effect! effect))))

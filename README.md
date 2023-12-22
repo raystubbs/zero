@@ -162,21 +162,15 @@ where the `prop spec map` can include the following options:
 - `:field` (string, optional) <br>
    This gives the field name to generate for the prop.  Zero will add a property to
    the generated element class with the given name; when said property changes this
-   prop will update, causing the component to re-render.  If a `:field` option isn't
-   explicitly given, _and_ this isn't a state prop (doesn't have `:state` or `:state-factory`)
-   then Zero default this to the cammelCase form of the prop name.  If this _is_ a state
-   prop, and the `:field` option is omitted, then no property will be added to the class
-   for this prop.  If this _is_ a state prop, and the `:field` option is given explicitly,
-   then a _read only_ property will be generated for the prop, with its actual value coming
-   from the bound state.
+   prop will update, causing the component to re-render.  If this is a state prop,
+   and the `:field` option is given explicitly, then a _read only_ property will be
+   generated for the prop, with its actual value coming from the bound state.  If
+   no `:field` option is given then this prop won't be mapped to an instance property.
 - `:attr` (string, optional) <br>
    This gives an attribute name that Zero should map to this prop.  If given, Zero will
    observe updates to said attribute on a component instance, and update the prop accordingly;
    causing the component to be re-rendered.  If no `:attr` is given, then this prop will
    not be mapped to an attribute.
-- `:attr-mapper` (function, optional) <br>
-   If given, _and_ an `:attr` option is set, this function will be called to map the attribute's
-   raw string value to a more useful prop value.
 - `:state` (`IWatchable`, optional) <br>
    Equivalent to `:state-factory (constantly <the state>)`.  See below.
 - `:state-factory` (function, optional) <br>
@@ -193,7 +187,9 @@ where the `prop spec map` can include the following options:
 As a convenience, Zero also supports several short hands for common prop configurations:
 - `#{<prop names>...}` <br>
   If the `:prop` option is given as a set of prop names instead of a map, Zero sees it
-  as equivalent to: `{<prop name> {:field <cammel cased prop name>} ...}`
+  as equivalent to: `{<prop name> :default ...}`
+- `{<prop name> :default}`<br>
+  Equivalent to `{<prop name> {:field <cammel cased prop name> :attr (name <prop name>)}}`
 - `{<prop name> :field}`<br>
   Equivalent to `{<prop name> {:field <cammel cased prop name>}}`.
 - `{<prop name> :attr}`<br>
