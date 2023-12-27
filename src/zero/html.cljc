@@ -2,6 +2,7 @@
   (:require
     [clojure.string :as str]
     [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name flatten-body]]
+    [zero.impl.injection :refer [apply-injections]]
     [zero.config :as zconfig]))
 
 (declare html)
@@ -60,4 +61,4 @@
     (str vnode)))
 
 (defn html [& markup]
-  (str/join (map vnode->html (flatten-body markup))))
+  (str/join (map vnode->html (flatten-body (apply-injections markup {})))))

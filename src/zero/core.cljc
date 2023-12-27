@@ -105,8 +105,9 @@ Indicates an injection point in actions or bindings.
    (fn [_ _ctx]
     \"Some data\"))
 ```
-" [injector-key & args]
-  (Injection. injector-key args))
+" [injection-key & things]
+  (let [[args others] (split-with (partial not= <<) things)]
+    (Injection. injection-key (cond-> (vec args) (seq others) (conj (apply << (rest others)))))))
 
 (def ^:deprecated reg-injector "
 Register one or more data injectors.

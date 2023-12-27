@@ -39,7 +39,7 @@
   :view (fn [{:keys [vdom]}] vdom))
 
 (defn <<act [& args]
-  (apply z/<< :z/act args))
+  (apply z/<< :ze/act args))
 
 (defn <<< [& args]
   (apply z/<< :z/<< args))

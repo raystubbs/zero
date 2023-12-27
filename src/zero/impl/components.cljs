@@ -3,6 +3,7 @@
     [clojure.set :as set]
     [zero.impl.base :as base]
     [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
+    [zero.impl.injection :refer [apply-injections]]
     [zero.config :as config]
     [clojure.string :as str]
     [goog.object :as gobj]
@@ -393,7 +394,7 @@
       (.removeChild dom child-dom)
       (prepare-dom-to-be-detached child-dom !instance-state))))
 
-(defn- render [^js/ShadowRoot dom ^js/ElementInternals internals !instance-state vnode]
+(defn- patch-root [^js/ShadowRoot dom ^js/ElementInternals internals !instance-state vnode]
   (let [!static-state (-> dom .-host .-constructor (gobj/get PRIVATE-SYM))
         default-css (:default-css @!static-state)
         old-props (gobj/get dom PROPS-SYM)
@@ -439,7 +440,7 @@
 (defonce ^:private !dirty (atom #{}))
 (defonce ^:private !render-frame-id (atom nil))
 
-(defn- do-render []
+(defn- render []
   (reset! !render-frame-id nil)
   (while (seq @!dirty)
     (let [batch @!dirty]
@@ -448,7 +449,8 @@
         (let [!static-state (-> dom .-constructor (gobj/get PRIVATE-SYM))
               !instance-state (gobj/get dom PRIVATE-SYM)
               ^js/ShadowDom shadow (:shadow @!instance-state)
-              rendered-props (gobj/get dom PROPS-SYM)]
+              rendered-props (gobj/get dom PROPS-SYM)
+              vdom (apply-injections ((:view @!static-state) (:props @!instance-state)) {:z.host dom :z.root shadow})]
 
           ;; if it needs to be focusable, but explicit tabIndex wasn't set
           (when (and
@@ -459,11 +461,11 @@
 
           ;; render the thing
           (try
-            (render
+            (patch-root
               shadow
               (:internals @!instance-state)
               !instance-state
-              ((:view @!static-state) (:props @!instance-state)))
+              vdom)
             (catch :default e
               (js/console.error "Error rendering component" (:name @!static-state) e)))
 
@@ -485,7 +487,7 @@
 (defn- request-render [^js/Node dom]
   (swap! !dirty conj dom)
   (when-not @!render-frame-id
-    (reset! !render-frame-id (js/requestAnimationFrame do-render))))
+    (reset! !render-frame-id (js/requestAnimationFrame render))))
 
 (defn- patch-el-class [class component-name {:keys [props view focus inherit-doc-css?]}]
   (let [^js proto (.-prototype class)

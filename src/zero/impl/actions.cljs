@@ -29,14 +29,24 @@
       (.preventDefault ev))
     (when (:stop-propagation? props)
       (.stopPropagation ev))
-    (let [^js root (.getRootNode (.-currentTarget ev))]
+    (let [^js root (.getRootNode (.-currentTarget ev))
+          ^js host (when (instance? js/ShadowRoot root) (.-host root))
+          data (config/harvest-event ev)]
       (apply act
-        {:shape   :z/event-context
+        {:z.event/data data
+         :z.event/target (.-target ev)
+         :z.event/current (.-currentTarget ev)
+         :z/event ev
+         :z/host host
+         :z/root root
+
+         ;; DEPRECATED
+         :shape   :z/event-context
          :event   ev
-         :data    (config/harvest-event ev)
+         :data    data
          :target  (.-target ev)
          :root    root
-         :host    (when (instance? js/ShadowRoot root) (.-host root))
+         :host    host
          :current (.-currentTarget ev)}
         nil))))
 
@@ -51,7 +61,7 @@
   IFn
   (-invoke
     ([action context]
-     (let [{:keys [log? throttle throttle-strategy]} (.-props action)
+     (let [{:keys [log? delta dispatch]} (.-props action)
            should-log? (and DEBUG log?)
            actually-perform! (fn actually-perform! []
                                (when should-log?
@@ -70,13 +80,13 @@
                                    (js/console.groupEnd)
                                    (doseq [error @!errors]
                                      (js/console.error error)))))]
-       (cond
-         (number? throttle)
+       (case (or dispatch :default)
+         (:throttle :debounce)
          (cond
            (nil? (gobj/get action THROTTLE-STATE))
            (do
-             (case (or throttle-strategy :default)
-               :default (js/setTimeout actually-perform!)
+             (case dispatch
+               :throttle (js/setTimeout actually-perform!)
                :debounce nil)
 
              (let [interval-id
@@ -92,13 +102,17 @@
                            :else
                            (do
                              (gobj/set action THROTTLE-STATE nil)
-                             (js/clearInterval interval-id))))))]
-               (gobj/set action THROTTLE-STATE {:hit? (= throttle-strategy :debounce) :interval-id interval-id})))
+                             (js/clearInterval interval-id)))))
+                     (or delta 300))]
+               (gobj/set action THROTTLE-STATE {:hit? (= dispatch :debounce) :interval-id interval-id})))
 
            :else
            (gobj/set action THROTTLE-STATE (assoc (gobj/get action THROTTLE-STATE) :hit? true)))
 
-         :else
+         :immediate
+         (actually-perform!)
+
+         :default
          (js/setTimeout actually-perform!))
        nil)))
 
