@@ -1,16 +1,13 @@
 (ns zero.extras.util
   (:require
     [clojure.string :as str]
+    [zero.config :as zc]
     [zero.core :as z]))
 
-(z/reg-injector
+(zc/reg-injections
   :ze/ctx
   (fn [context & path]
     (get-in context path))
-
-  :ze/call
-  (fn [_ f & args]
-    (apply f args))
 
   :ze/act
   (fn [_ & args]
@@ -20,29 +17,27 @@
   (fn [_ & args]
     (apply z/<< args)))
 
-(z/reg-effect
+(zc/reg-effects
   :ze/cond
   (fn [& cases]
     (when-let [[_ & effects] (first (filter first cases))]
-      (doseq [effect effects]
-        (z/do-effects! effect))))
+      ((apply z/act effects) nil)))
 
   :ze/effects
   (fn [effects]
-    (doseq [effect effects]
-      (z/do-effects! effect))))
+    ((apply z/act effects) nil)))
 
-(z/component
-  :name :ze/echo
-  :inherit-doc-css? true
-  :props #{:vdom}
-  :view (fn [{:keys [vdom]}] vdom))
+(zc/reg-components
+  :ze/echo
+  {:inherit-doc-css? true
+   :props #{:vdom}
+   :view (fn [{:keys [vdom]}] vdom)})
 
 (defn <<act [& args]
   (apply z/<< :ze/act args))
 
 (defn <<< [& args]
-  (apply z/<< :z/<< args))
+  (apply z/<< :ze/<< args))
 
 (defn derived [f & deps]
   (fn [rx & args]
@@ -108,42 +103,43 @@
 (defprotocol IDisposable
   (-dispose [disposable]))
 
-(defn slotted-elements-prop [& {:keys [selector slots]}]
-  (let [slotted-selector (some-> selector css-selector)
-        slot-selector (if slots (->> slots (map #(str "slot[name=\"" (name %) "\"]")) (str/join ",")) "slot")]
-    {:state-factory
-     (fn slotted-prop-state-factory [^js/HTMLElement dom]
-       (let [shadow (.-shadowRoot dom)
-             !slotted (atom nil)
-             update-slotted! (fn update-slotted! []
-                               (let [now-slotted (set
-                                                   (for [slot (array-seq (.querySelectorAll shadow slot-selector))
-                                                         node (array-seq (.assignedNodes slot))
-                                                         :when (or (nil? slotted-selector) (and (instance? js/HTMLElement node) (.matches node slotted-selector)))]
-                                                     node))]
-                                 (when (not= now-slotted @!slotted)
-                                   (reset! !slotted now-slotted))))
-             abort-controller (js/AbortController.)]
-         (update-slotted!)
+#?(:cljs
+   (defn slotted-elements-prop [& {:keys [selector slots]}]
+     (let [slotted-selector (some-> selector css-selector)
+           slot-selector (if slots (->> slots (map #(str "slot[name=\"" (name %) "\"]")) (str/join ",")) "slot")]
+       {:state-factory
+        (fn slotted-prop-state-factory [^js/HTMLElement dom]
+          (let [shadow (.-shadowRoot dom)
+                !slotted (atom nil)
+                update-slotted! (fn update-slotted! []
+                                  (let [now-slotted (set
+                                                      (for [slot (array-seq (.querySelectorAll shadow slot-selector))
+                                                            node (array-seq (.assignedNodes slot))
+                                                            :when (or (nil? slotted-selector) (and (instance? js/HTMLElement node) (.matches node slotted-selector)))]
+                                                        node))]
+                                    (when (not= now-slotted @!slotted)
+                                      (reset! !slotted now-slotted))))
+                abort-controller (js/AbortController.)]
+            (update-slotted!)
 
-         (.addEventListener shadow "slotchange" update-slotted! #js{:signal (.-signal abort-controller)})
-         #_(.addEventListener shadow "render" update-slotted! #js{:signal (.-signal abort-controller)})
+            (.addEventListener shadow "slotchange" update-slotted! #js{:signal (.-signal abort-controller)})
+            #_(.addEventListener shadow "render" update-slotted! #js{:signal (.-signal abort-controller)})
 
-         (reify
-           IDeref
-           (-deref [_]
-             @!slotted)
+            (reify
+              IDeref
+              (-deref [_]
+                @!slotted)
 
-           IWatchable
-           (-add-watch [_ k f]
-             (-add-watch !slotted k f))
-           (-remove-watch [_ k]
-             (-remove-watch !slotted k))
+              IWatchable
+              (-add-watch [_ k f]
+                (-add-watch !slotted k f))
+              (-remove-watch [_ k]
+                (-remove-watch !slotted k))
 
-           IDisposable
-           (-dispose [_]
-             (.abort abort-controller)))))
+              IDisposable
+              (-dispose [_]
+                (.abort abort-controller)))))
 
-     :state-cleanup
-     (fn slotted-prop-state-cleanup [state _]
-       (-dispose state))}))
+        :state-cleanup
+        (fn slotted-prop-state-cleanup [state _]
+          (-dispose state))})))

@@ -84,30 +84,29 @@
          (:throttle :debounce)
          (cond
            (nil? (gobj/get action THROTTLE-STATE))
-           (do
+           (let [interval-id
+                 (js/setInterval
+                   (fn []
+                     (let [{:keys [interval-id dispatch-fn] :as state} (gobj/get action THROTTLE-STATE)]
+                       (cond
+                         (some? dispatch-fn)
+                         (do
+                           (js/setTimeout dispatch-fn)
+                           (gobj/set action THROTTLE-STATE (dissoc state :dispatch-fn)))
+
+                         :else
+                         (do
+                           (gobj/set action THROTTLE-STATE nil)
+                           (js/clearInterval interval-id)))))
+                   (or delta 300))]
              (case dispatch
-               :throttle (js/setTimeout actually-perform!)
-               :debounce nil)
-
-             (let [interval-id
-                   (js/setInterval
-                     (fn []
-                       (let [{:keys [hit? interval-id] :as state} (gobj/get action THROTTLE-STATE)]
-                         (cond
-                           hit?
-                           (do
-                             (js/setTimeout actually-perform!)
-                             (gobj/set action THROTTLE-STATE (assoc state :hit? false)))
-
-                           :else
-                           (do
-                             (gobj/set action THROTTLE-STATE nil)
-                             (js/clearInterval interval-id)))))
-                     (or delta 300))]
-               (gobj/set action THROTTLE-STATE {:hit? (= dispatch :debounce) :interval-id interval-id})))
+               :throttle (do
+                           (js/setTimeout actually-perform!)
+                           (gobj/set action THROTTLE-STATE {:interval-id interval-id}))
+               :debounce (gobj/set action THROTTLE-STATE {:dispatch-fn actually-perform! :interval-id interval-id})))
 
            :else
-           (gobj/set action THROTTLE-STATE (assoc (gobj/get action THROTTLE-STATE) :hit? true)))
+           (gobj/set action THROTTLE-STATE (assoc (gobj/get action THROTTLE-STATE) :dispatch-fn actually-perform!)))
 
          :immediate
          (actually-perform!)
