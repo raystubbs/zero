@@ -1,11 +1,11 @@
 (ns zero.extras.db
   (:require
-    [zero.core :as z]))
+    [zero.config :as zc]))
 
 (defonce !db (atom {}))
 (defonce ^:private !db-watches (atom {}))
 
-(z/reg-stream
+(zc/reg-streams
   :ze.db/path
   (fn [rx path & {:keys [transform]}]
     (let [path (vec path)
@@ -32,7 +32,7 @@
 (defn get [path]
   (get-in @!db path))
 
-(z/reg-injector
+(zc/reg-injections
   :ze.db/path
   (fn [_ path]
     (get-in @!db path)))
@@ -164,7 +164,7 @@
             rx (:rxs (get-in @!db-watches (if (empty? path) [] (into [:sub] (interpose :sub path)))))]
       (rx (get-in @!db path)))))
 
-(z/reg-effect
+(zc/reg-effects
   :ze.db/patch
   (fn [patch]
     (patch! patch)))

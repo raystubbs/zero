@@ -25,12 +25,16 @@
           (catch :default e
             (log! :error "Error in stream watcher" {:stream stream-ident} e)))))))
 
-(defn- boot-stream [[stream-key args :as stream-ident]]
-  (swap! !stream-states assoc stream-ident {:watches {}})
-  (let [stream-fn (or (get-in @config/!registry [:stream-handlers stream-key]) (throw (ex-info "No stream registered for key" {:stream-key stream-key})))
-        kill-fn (apply stream-fn (rx-fn stream-ident) (apply-injections args {}))]
-    (swap! !stream-states assoc-in [stream-ident :kill-fn] kill-fn)
-    nil))
+(defn- boot-stream [[stream-key args :as stream-ident] watches]
+  (try
+    (swap! !stream-states assoc-in [stream-ident :watches] watches)
+    (let [stream-fn (or (get-in @config/!registry [:stream-handlers stream-key]) (throw (ex-info "No stream registered for key" {:stream-key stream-key})))
+          kill-fn (apply stream-fn (rx-fn stream-ident) (apply-injections args {}))]
+      (swap! !stream-states assoc-in [stream-ident :kill-fn] kill-fn)
+      nil)
+    (catch :default e
+      (log! :error "Error booting stream" {:stream-key stream-key :args args} e)
+      (swap! !stream-states dissoc stream-ident))))
 
 (deftype Binding [props stream-key args]
   IDeref
@@ -44,9 +48,9 @@
                        (fn [ref key old-val new-val]
                          (f ref key old-val (if (nil? new-val) (:default props) new-val)))
                        f)]
-      (when (nil? (get @!stream-states [stream-key args]))
-        (boot-stream [stream-key args]))
-      (swap! !stream-states assoc-in [[stream-key args] :watches [this key]] actual-fun)))
+      (if (nil? (get @!stream-states [stream-key args]))
+        (boot-stream [stream-key args] {[this key] actual-fun})
+        (swap! !stream-states assoc-in [[stream-key args] :watches [this key]] actual-fun))))
   (-remove-watch [this key]
     (let [old-watches (get-in @!stream-states [[stream-key args] :watches])
           new-watches (dissoc old-watches [this key])]
@@ -85,8 +89,11 @@
         (try
           (kill-fn)
           (catch :default e
-            (log! :error "Error in stream cleanup fn" {:stream-key (nth stream-ident 0) :args (nth stream-ident 1)} e))))
-      (swap! !stream-states assoc-in [stream-ident :kill-fn]
-        (apply stream-handler (rx-fn stream-ident) (apply-injections args {}))))))
+            (log! :error "Error in stream cleanup fn" {:stream-key stream-key :args args} e))))
+      (try
+        (swap! !stream-states assoc-in [stream-ident :kill-fn]
+          (apply stream-handler (rx-fn stream-ident) (apply-injections args {})))
+        (catch :default e
+          (log! :error "Error in stream boot fn, hot swap failed" {:stream-key stream-key :args args} e))))))
 (add-watch config/!registry ::update-streams #(update-streams! %3 %4))
 (update-streams! {} @config/!registry)
