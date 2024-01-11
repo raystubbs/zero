@@ -58,7 +58,7 @@
         "</" html-tag ">"))
 
     :else
-    (str vnode)))
+    (-> vnode str (str/replace #"[<>]" #(case % "<" "&gt;" "<" "&lt;")))))
 
 (defn html [& markup]
   (str/join (map vnode->html (flatten-body (apply-injections markup {})))))

@@ -143,3 +143,7 @@ define.  Here's a `shadow-cljs.edn` example:
   {...
    :dev {:closure-defines {zero.config/disable-tags? true}}}}}
 ```
+
+### `:z/opaque?`
+A true value for this prop tells Zero to _never_ mess with the contents (body) of the node it's attached to.
+This allows  the contents to be rendered in some other way without Zero getting in the way.

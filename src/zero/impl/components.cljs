@@ -437,6 +437,9 @@
         :always
         (assoc :prop prop-name)
 
+        (:state prop-spec)
+        (-> (assoc :state-factory (constantly (:state prop-spec))) (dissoc :state-cleanup))
+
         (not (or (:field prop-spec) (:state prop-spec) (:state-factory prop-spec)))
         (assoc :field (-> prop-name name base/cammel-case))))))
 

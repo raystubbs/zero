@@ -26,3 +26,5 @@
       (let [effect-fn (or (get-in @config/!registry [:effect-handlers effect-key])
                         (throw (ex-info "No effect registered for key" {:effect-key effect-key})))]
         (apply effect-fn args)))))
+
+(defmethod print-method Action [act w] (.write w (.toString act)))
