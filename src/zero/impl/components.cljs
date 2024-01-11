@@ -306,10 +306,13 @@
             (recur next-target-index (inc next-target-index)))
 
           ;; It's a pivot node if it's only been shifted by 1 in either direction,
-          ;; and its new index doesn't cross (is greater than) boundary-index.  Pivots
-          ;; are considered 'stable', we don't move them, instead everything else moves
+          ;; and both its old and new indices are greater than boundary-index.  Pivots
+          ;; are 'stable', we don't move them, instead everything else moves
           ;; around them.
-          (and (< boundary-index next-target-index) (<= (dec next-source-index) next-target-index (inc next-source-index)))
+          (and
+            (< boundary-index next-target-index)
+            (< boundary-index next-source-index)
+            (<= (dec next-source-index) next-target-index (inc next-source-index)))
           (recur next-target-index (inc next-target-index))
 
           :else
