@@ -61,6 +61,7 @@ utility functions.
 ### Components
 
 - `:ze/echo`
+
   A component which takes some Zero markup as a prop, and renders it.
 
   ```clojure
