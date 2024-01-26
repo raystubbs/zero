@@ -14,18 +14,23 @@ utility functions.
 
 ### Injections
 
-`:ze/ctx`
-: Resolves a path against the injector context.  So `(<< :ze/ctx :z/host)` grabs `:z/host` from
+- `:ze/ctx`
+  
+  Resolves a path against the injector context.  So `(<< :ze/ctx :z/host)` grabs `:z/host` from
   the context, and `(<< :ze/ctx :z.event/data :foo)` does `(get-in ctx [:z.event/data :foo])`.
 
-`:ze/<<`
-: Injects an _injection_.  This creates a level of indirection.  Useful to avoid resolving the
+
+- `:ze/<<`
+  
+  Injects an _injection_.  This creates a level of indirection.  Useful to avoid resolving the
   inner injection on action dispatch, when passing markup into an action's effect.  This comes
   with a utility function `<<<` which offers better aesthetics.  So `(<<< :something)` is
   equivalent to `(<< :ze/<< :something)`.
 
-`:ze/act`
-: Injects an _action_.  This is useful when passing markup that includes nested actions that
+
+- `:ze/act`
+  
+  Injects an _action_.  This is useful when passing markup that includes nested actions that
   depend on data from the constructing context, into an action's effect.  Since injections in
   regular `(act ...)` actions will be resolved when said action is dispatched, in the dispatch
   context; not the constructing context.  This also comes with a utility function `<<act` for
@@ -34,8 +39,9 @@ utility functions.
 
 ### Effects
 
-`:ze/cond`
-: Conditionally invokes effects.  Given a sequence of `[test ...effects]` vectors, invokes the
+- `:ze/cond`
+  
+  Conditionally invokes effects.  Given a sequence of `[test ...effects]` vectors, invokes the
   effects from the first truthy `test`.
 
   ```clojure
@@ -44,8 +50,9 @@ utility functions.
         [(<< :otherthing?) [:do-otherthing]]])
   ```
 
-`:ze/effects`
-: Takes and invokes a sequence of effects.
+- `:ze/effects`
+
+  Takes and invokes a sequence of effects.
 
   ```clojure
   (act [:ze/effects [[:do-something] [:do-otherthing]]])
@@ -53,8 +60,8 @@ utility functions.
 
 ### Components
 
-`:ze/echo`
-: A component which takes some Zero markup as a prop, and renders it.
+- `:ze/echo`
+  A component which takes some Zero markup as a prop, and renders it.
 
   ```clojure
   [:ze/echo :vdom [:div "Hello, World!"]]
@@ -62,8 +69,9 @@ utility functions.
 
 ### Functions
 
-`(derived f & deps)`
-: Creates a function that can serve as the handler for a derived data stream.  Takes
+- `(derived f & deps)`
+
+  Creates a function that can serve as the handler for a derived data stream.  Takes
   a function `f` of the form `(fn [[& deps] & args])` which maps the values from
   its dependencies to the stream's output value, and the sequence of watchable dependencies
   `deps`.
@@ -78,20 +86,27 @@ utility functions.
       (bnd :bar)))
   ```
 
-`(watch key f & deps)`
-: Registers a function to do something when a set of dependency watchables changes.  Takes
+- `(watch key f & deps)`
+  
+  Registers a function to do something when a set of dependency watchables changes.  Takes
   a `key` which can be used to `(unwatch key)`, a function `f` of the form `(fn [& deps])`,
   and a sequence of dependency watchables `deps`.
 
-`(unwatch key)`
-: Removes a watcher registered with `watch`.
 
-`(css-selector selector)`
-: If given a keyword, converts the keyword of the form `:my.example/my-component#id.class1.class2`
+- `(unwatch key)`
+  
+  Removes a watcher registered with `watch`.
+
+
+- `(css-selector selector)`
+
+  If given a keyword, converts the keyword of the form `:my.example/my-component#id.class1.class2`
   into the appropriate CSS selector string; in this case `my\.example-my-component#id.class1.class2`.
 
-`(slotted-elements-prop & {:keys [selector slots})`
-: Creates a _state factory_ prop which produces a state object with a set of elements currently slotted
+
+- `(slotted-elements-prop & {:keys [selector slots})`
+  
+  Creates a _state factory_ prop which produces a state object with a set of elements currently slotted
   in `<slot>` elements within the component.  If a `selector` is provided, it's used to filter the
   included elements.  If a `slots` option is given, only elements in slots with the given names
   are included.  This is useful to allow a component's markup to react to whether an element is
@@ -125,11 +140,14 @@ requirements include:
 That said, this DB will probably work just fine for most basic projects.  The module exposes the following
 functions and registrations for interacting with the main DB.
 
-`(get path)`
-: Resolves some path against the DB.
+- `(get path)`
 
-`(patch! patch)`
-: Applies a `patch` to the DB.  The `patch` is a vector of changes, each change being a map of the form:
+  Resolves some path against the DB.
+
+
+- `(patch! patch)`
+  
+  Applies a `patch` to the DB.  The `patch` is a vector of changes, each change being a map of the form:
   `{:path path-to-change :<op> op-payload :fnil default-value}`.  The `:fnil` is optional, if given its
   value will be substituted for the current value at the given path when applying the change op, if said
   value is `nil`.  The `<op>` determines how the path's value is changed, and can be one of:
@@ -142,14 +160,17 @@ functions and registrations for interacting with the main DB.
   - `:fn`, `:args` - Apply `op-payload` (should be a function) to the current path value and any extra args given 
      in `:args`.
 
-`(<< :ze.db/path path)`
-: Injects the value at `path` in the DB.
+- `(<< :ze.db/path path)`
 
-`(bnd :ze.db/path path)`
-: Tracks the current value at `path` in the DB.
+  Injects the value at `path` in the DB.
 
-`(act [:ze.db/patch patch])`
-: Applies `patch` to the DB.  Equivalent to `(patch! patch)`.
+- `(bnd :ze.db/path path)`
+
+  Tracks the current value at `path` in the DB.
+
+- `(act [:ze.db/patch patch])`
+
+  Applies `patch` to the DB.  Equivalent to `(patch! patch)`.
 
 In addition, the `(apply-patch m patch)` function, which implements the DB's patching functionality against
 any map, is exposed to allow for implementing other DBs with the same patch notation.  This function returns

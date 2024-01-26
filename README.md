@@ -132,15 +132,12 @@ value returned from the registered injection handler.
 
 ## More Docs
 
-[Configuration](doc/Configuration.md)
-: Full walkthrough of `zero.config`, which is used to configure all aspect of Zero,
+- [Configuration](doc/Configuration.md) - Full walkthrough of `zero.config`, which is used to configure all aspect of Zero,
   including registering components, effects, and streams.
 
-[Markup](doc/Markup.md)
-: Detailed description of the markup notation used by Zero.
+- [Markup](doc/Markup.md) - Detailed description of the markup notation used by Zero.
 
-[Extras](doc/Extras.md)
-: Goes through Zero's 'extra' modules, including derived streams and the built-in database implementation.
+- [Extras](doc/Extras.md) - Goes through Zero's 'extra' modules, including derived streams and the built-in database implementation.
 
 ## Contact
 - [zero@raystubbs.me](mailto:zero@raystubbs.me)
