@@ -1,4 +1,5 @@
-(ns zero.config)
+(ns zero.config
+  (:refer-clojure :exclude [derive]))
 
 #?(:cljs
    (do
@@ -8,7 +9,7 @@
      (goog-define disable-tags? false)
 
      (defmulti harvest-event
-       (fn [^js/Event event] [(some-> event .-currentTarget .-componentName namespace keyword) (keyword (.-type event))]))
+       (fn [^js/Event event] (keyword (.-type event))))
 
      (defmethod harvest-event :default [^js/Event event]
        (case (.-type event)
@@ -68,7 +69,7 @@
 (defn derive [component-name parent]
   (swap! !h-components clojure.core/derive component-name parent))
 
-(defonce ^:private !registry (atom {}))
+(defonce !registry (atom {}))
 
 (defn reg-effects [& {:as effect-specs}]
   (swap! !registry update :effect-handlers (fnil into {}) effect-specs))
