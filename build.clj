@@ -2,7 +2,8 @@
   (:require
    [clojure.tools.build.api :as b]
    [clojure.edn :as edn]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [deps-deploy.deps-deploy :as d]))
 
 (def basis (delay (b/create-basis {:project "deps.edn"})))
 
@@ -38,10 +39,24 @@
        :lib name
        :version version-str
        :basis @basis
-       :src-dirs ["src"]})
+       :src-dirs ["src"]
+       :pom-data [[:licenses
+                   [:license
+                    [:name "The MIT License"]
+                    [:url "https://opensource.org/license/mit/"]
+                    [:distribution "repo"]]]]})
     (b/copy-dir
       {:src-dirs ["src"]
        :target-dir class-dir})
     (b/jar
       {:class-dir class-dir
        :jar-file (format "target/%s-%s.jar" (clojure.core/name name) version-str)})))
+
+(defn deploy [_]
+  (let [{:keys [version name]} (edn/read-string (slurp "meta.edn"))
+        version-str (str/join "." version)]
+    (d/deploy
+      {:installer :remote
+       :artifact (format "target/%s-%s.jar" (clojure.core/name name) version-str)
+       :pom-file (str "target/classes/META-INF/maven/" (namespace name) "/" (clojure.core/name name) "/pom.xml")
+       :sign-releases? true})))

@@ -1,3 +1,6 @@
+
+[![Clojars Project](https://img.shields.io/clojars/v/me.raystubbs/zero.svg)](https://clojars.org/me.raystubbs/zero)
+
 # Zero
 A toolkit for building web components in ClojureScript.
 

@@ -10,4 +10,5 @@ node_modules
 *.iml
 .idea
 pom.xml
+*.pom.asc
 target/*
