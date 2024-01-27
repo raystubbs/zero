@@ -50,7 +50,7 @@ tag.
   (extract-tag-props
     [:div#my-thing.foo.bar {:z/class "something"} (list "body")]))
 
-(defn- preproc-vnode "
+(defn preproc-vnode "
 Simplifies the vnode, parsing out the classes and id from
 the tag, and converting compound tags (i.e `[:div :span]`)
 into nested vnodes, and accumulating the whole body into

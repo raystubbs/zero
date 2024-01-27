@@ -143,7 +143,5 @@ value returned from the registered injection handler.
 
 [wc]: https://developer.mozilla.org/en-US/docs/Web/API/Web_components
 [hiccup]: https://github.com/weavejester/hiccup
-[counter-demo]: https://raystubbs.github.io/zero/demos/counter/pub/index.html
-[todomvc-demo]: https://raystubbs.github.io/zero/demos/todomvc/pub/index.html
 [markup-doc]: doc/Markup.md
 [delegates-focus]: https://developer.mozilla.org/en-US/docs/Web/API/ShadowRoot/delegatesFocus

@@ -9,3 +9,5 @@
 node_modules
 *.iml
 .idea
+pom.xml
+target/*

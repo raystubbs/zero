@@ -5,4 +5,8 @@
  {:dev
   {:extra-deps {org.clojure/clojure {:mvn/version "1.11.1"}
                 org.clojure/clojurescript {:mvn/version "1.11.60"}}
-   :extra-paths []}}}
+   :extra-paths []}
+  
+  :build
+  {:deps {io.github.clojure/tools.build {:git/tag "v0.9.6" :git/sha "8e78bcc"}}
+   :ns-default build}}}
