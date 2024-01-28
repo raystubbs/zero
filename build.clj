@@ -44,7 +44,11 @@
                    [:license
                     [:name "The MIT License"]
                     [:url "https://opensource.org/license/mit/"]
-                    [:distribution "repo"]]]]})
+                    [:distribution "repo"]]]
+                  [:scm
+                   [:url "https://github.com/raystubbs/zero"]
+                   [:connection "scm:git:https://github.com/raystubbs/zero.git"]
+                   [:developerConnection "scm:git:ssh://git@github.com:raystubbs/zero.git"]]]})
     (b/copy-dir
       {:src-dirs ["src"]
        :target-dir class-dir})
