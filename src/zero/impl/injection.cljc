@@ -1,7 +1,8 @@
 (ns zero.impl.injection
   (:require
    [clojure.walk :refer [postwalk]]
-   [zero.impl.base :refer [log!]]
+   [zero.impl.logger :as log]
+   [zero.impl.base :refer [try-catch]]
    [zero.config :as config]))
 
 (defprotocol IInjection
@@ -35,15 +36,13 @@
     (let [cache-key [(.-injector-key inj) (.-args inj)]]
       (if (contains? @!cache cache-key)
         (get @!cache cache-key)
-        (try
+        (try-catch
           (let [injector (or (get-in @config/!registry [:injection-handlers (.-injector-key inj)])
                            (throw (ex-info "No injector registered for key" {:injector-key (.-injector-key inj)})))
                 r (apply injector context (postwalk #(if (instance? Injection %) (-inj-injected % context !cache) %) (.-args inj)))]
             (swap! !cache assoc cache-key r)
             r)
-          (catch #?(:clj Exception :cljs :default) e
-            (log! :error e {:injection inj})
-            nil)))))
+          (log/error :exception % :injection inj)))))
   (-inj-equiv [^Injection inj other]
     (and
       (instance? Injection other)

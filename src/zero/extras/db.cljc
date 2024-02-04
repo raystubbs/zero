@@ -6,7 +6,7 @@
 (defonce ^:private !db-watches (atom {}))
 
 (zc/reg-streams
-  :ze.db/path
+  ::path
   (fn [rx path & {:keys [transform]}]
     (let [path (vec path)
           watch-node-path (if (empty? path) [] (into [:sub] (interpose :sub path)))
@@ -33,7 +33,7 @@
   (get-in @!db path))
 
 (zc/reg-injections
-  :ze.db/path
+  ::path
   (fn [_ path]
     (get-in @!db path)))
 
@@ -165,6 +165,6 @@
       (rx (get-in @!db path)))))
 
 (zc/reg-effects
-  :ze.db/patch
+  ::patch
   (fn [patch]
     (patch! patch)))

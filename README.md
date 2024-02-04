@@ -35,7 +35,6 @@ repo yet, [use the SHA](https://clojure.org/news/2018/01/05/git-deps).
 ## Organization
 - `zero.core` has all the essentials
 - `zero.extras.*` has optional QoL utilities
-  + Require `zero.extras.all` to pull everything into the build
 
 ## Examples
 Zero allows you to build native web components with a [Hiccup][hiccup]-like
@@ -46,8 +45,8 @@ notation.  Here's what that looks like:
   [:section.some-class
    [:h3 heading]
    [:p
-    :z/class ["paragraph" "content"]
-    :z/style {:height "5rem"}
+    ::z/class ["paragraph" "content"]
+    ::z/style {:height "5rem"}
     [:slot]]])
 ```
 
@@ -81,13 +80,13 @@ in `zero.core`.  Here's an example using all three of them:
 ```clojure
 (ns example
   (:require
-    [zero.core :refer [act bnd <<]]
+    [zero.core :refer [act bnd <<] :as z]
     [zero.config :as zc]))
 
 (defn counter-view []
   [:div
    [:input :disabled true :value (bnd ::count)]
-   [:button :z/on {:click (act [::reset])} (<< ::reset-text)]])
+   [:button ::z/on {:click (act [::reset])} (<< ::reset-text)]])
 
 (defonce !count (atom nil))
 

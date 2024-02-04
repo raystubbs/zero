@@ -16,8 +16,9 @@ utility functions.
 
 - `:ze/ctx`
   
-  Resolves a path against the injector context.  So `(<< :ze/ctx :z/host)` grabs `:z/host` from
-  the context, and `(<< :ze/ctx :z.event/data :foo)` does `(get-in ctx [:z.event/data :foo])`.
+  Resolves a path against the injector context.  So `(<< :ze/ctx :zero.core/host)` grabs
+  `:zero.core/host` from the context, and `(<< :ze/ctx :zero.core/event.data :foo)` does
+  `(get-in ctx [:zero.core/event.data :foo])`.
 
 
 - `:ze/<<`

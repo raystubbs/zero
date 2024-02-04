@@ -28,27 +28,29 @@ yields `[tag-or-tags props body]`.
   (normalize-vnode
     [:div
      :on-click "blah"
-     :z/class :none
+     :zero.core/class :none
      "Something else"]))
 
 (defn- extract-tag-props "
 Given a normalized vnode, parses the ids and classes
-out of the tag and into the props, adding a `:z/sel`
+out of the tag and into the props, adding a `:zero.core/sel`
 prop containing the original
 tag.
 " [[tag props body]]
   (if-let [[_ type id classes] (re-matches #"^([^#.]+)([#][^.]+)?([.].+)?$" (name tag))]
     [(keyword (namespace tag) type)
      (cond-> props
-       true (assoc :z/sel tag)
+       true (assoc :zero.core/sel tag)
        (not (str/blank? id)) (assoc :id (subs id 1))
-       (not (str/blank? classes)) (assoc :z/class (->> [(some-> classes (str/split #"[.]")) (:z/class props)] flatten (remove str/blank?) not-empty)))
+       (not (str/blank? classes)) (assoc :zero.core/class
+                                    (->> [(some-> classes (str/split #"[.]")) (:zero.core/class props)]
+                                      flatten (remove str/blank?) not-empty)))
      body]
     (throw (ex-info "Invalid tag" {:tag tag}))))
 
 (comment
   (extract-tag-props
-    [:div#my-thing.foo.bar {:z/class "something"} (list "body")]))
+    [:div#my-thing.foo.bar {:zero.core/class "something"} (list "body")]))
 
 (defn preproc-vnode "
 Simplifies the vnode, parsing out the classes and id from
@@ -66,12 +68,12 @@ one sequence.
         (case (count tag-or-tags)
           0 (throw (ex-info "Invalid tag" {:tag tag-or-tags}))
           1 [(first tag-or-tags) props body]
-          [(first tag-or-tags) (select-keys props [:z/key])
+          [(first tag-or-tags) (select-keys props [:zero.core/key])
            (list
              (reduce
                (fn [m middle-tag]
                  (extract-tag-props [middle-tag {} (list m)]))
-               (extract-tag-props [(last tag-or-tags) (dissoc props :z/key) body])
+               (extract-tag-props [(last tag-or-tags) (dissoc props :zero.core/key) body])
                (-> tag-or-tags butlast rest)))]))
       extract-tag-props)))
 

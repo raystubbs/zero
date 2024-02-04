@@ -33,21 +33,12 @@
           ^js host (when (instance? js/ShadowRoot root) (.-host root))
           data (config/harvest-event ev)]
       (apply act
-        {:z.event/data data
-         :z.event/target (.-target ev)
-         :z.event/current (.-currentTarget ev)
-         :z/event ev
-         :z/host host
-         :z/root root
-
-         ;; DEPRECATED
-         :shape   :z/event-context
-         :event   ev
-         :data    data
-         :target  (.-target ev)
-         :root    root
-         :host    host
-         :current (.-currentTarget ev)}
+        {:zero.core/event.data data
+         :zero.core/event.target (.-target ev)
+         :zero.core/event.current (.-currentTarget ev)
+         :zero.core/event ev
+         :zero.core/host host
+         :zero.core/root root}
         nil))))
 
 (defonce ^:private THROTTLE-STATE (js/Symbol "zThrottleState"))

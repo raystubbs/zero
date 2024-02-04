@@ -29,12 +29,12 @@ Zero will automatically extract an 'action context' from the
 event, which will be a map with the following:
 
 ```clojure
-{:z.event/data (comment \"event-type-dependent data extracted from the event via `zero.config/harvest-event`\")
- :z.event/target (comment \"the event target\")
- :z.event/current (comment \"the current element which the event is being dispatched on\")
- :z/event (comment \"the original event, this will generally be stale\")
- :z/host (comment \"if `:root` is a ShadowRoot, then this will be its host element, otherwise `nil`\")
- :z/root (comment \"the root element of `:current`)}
+{:zero.core/event.data (comment \"event-type-dependent data extracted from the event via `zero.config/harvest-event`\")
+ :zero.core/event.target (comment \"the event target\")
+ :zero.core/event.current (comment \"the current element which the event is being dispatched on\")
+ :zero.core/event (comment \"the original event, this will generally be stale\")
+ :zero.core/host (comment \"if `:root` is a ShadowRoot, then this will be its host element, otherwise `nil`\")
+ :zero.core/root (comment \"the root element of `:current`)}
 ```
 
 The context will be passed to injectors found within the action, which can extract useful info from
@@ -143,63 +143,44 @@ As a convenience, injectors can be chained without nesting:
   (let [[args others] (split-with (partial not= <<) things)]
     (Injection. injection-key (cond-> (vec args) (seq others) (conj (apply << (rest others)))))))
 
-(def ^:deprecated reg-injector "
-Register one or more data injectors.
-```clojure
-(reg-injector
-  :event/data (fn [{:keys [event]}] (.-data event))
-  :event/type (fn [{:keys [event]}] (.-type event)))
-
-(act ::echo (<< :event/data))
-```
-
-When dispatched from an action, injectors will receive
-an `event` context value containing captured fields from
-the original event.
-" config/reg-injections)
-
-#?(:cljs
-   (defn ^:deprecated component "
-Create a component.
-
-```clojure
-(component
-  :name ::my-thing
-  :props {:foo :attr :bar :field :baz :prop}
-  :view (fn [{:keys [foo bar baz]}]
-          (list
-            [:h1 foo]
-            [:h2 bar]
-            [:h3 baz])))
-```
-Zero components are native web components, so creating
-one adds it to the browser's custom element registry.
-
-Props must be declared, and can be embodied as either
-an attribute, a field on the generated class, or both.
-For non-string props it can be useful to map from an
-attribute string to something more useful, this can be
-done with an `attr-mapper` function like so:
-
-```clojure
-:props {:foo {:attr \"foo\" :field \"foo\" :attr-mapper js/parseInt}}
-```
-" [& {:keys [name props view focus] :as things}]
-     (config/reg-components (:name things) things)))
-
-(defn ^:deprecated component-name "
-The custom element name that will be generated for a given
-keyword.
-"[kw]
-  (markup/kw->el-name kw))
-
 (defn element-name "
 Given a keyword, returns the custom element name that'll be generated
 for a component with this name.
 " [kw]
   (markup/kw->el-name kw))
 
-#?(:cljs
-   (defn ^:deprecated do-effects! [& effects]
-     (doseq [effect effects]
-       (act/do-effect! effect))))
+(defn act?
+  [x]
+  (instance? Action x))
+
+(defn act->map
+  [^Action act]
+  {:props (.-props act) :effects (.-effects act)})
+
+(defn map->act
+  [m]
+  (Action. (into {} (:props m)) (vec (:effects m))))
+
+(defn inj?
+  [x]
+  (instance? Injection x))
+
+(defn inj->map
+  [^Injection inj]
+  {:key (.-injector-key inj) :args (.-args inj)})
+
+(defn map->inj
+  [m]
+  (Injection. (:key m) (vec (:args m))))
+
+(defn bnd?
+  [x]
+  (instance? Binding x))
+
+(defn bnd->map
+  [^Binding bnd]
+  {:key (.-stream-key bnd) :props (.-props bnd) :args (.-args bnd)})
+
+(defn map->bnd
+  [m]
+  (Binding. (into {} (:props m)) (:key m) (vec (:args m))))

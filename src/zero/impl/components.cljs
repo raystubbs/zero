@@ -122,7 +122,7 @@
 (defn diff-props [old-props new-props]
   (let [all-keys (merge old-props new-props)]
     (as-> all-keys $
-      (dissoc $ :z/style :z/on)
+      (dissoc $ :zero.core/style :zero.core/on)
       (keys $)
       (reduce
         (fn [diff key]
@@ -140,7 +140,7 @@
               (if (empty? inner-diff)
                 diff
                 (assoc diff key inner-diff)))))
-        $ [:z/style :z/on :z/aria]))))
+        $ [:zero.core/style :zero.core/on :zero.core/aria]))))
 
 (defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props]
   (let [old-props (gobj/get dom PROPS-SYM)
@@ -151,15 +151,15 @@
                          (gobj/set dom HOST-CSS-SYM x)
                          x))]
     (when-not (empty? diff)
-      (when-let [style-diff (diff :z/style)]
+      (when-let [style-diff (diff :zero.core/style)]
         (let [style-obj (-> host-css .-cssRules (.item 0) .-style)]
           (doseq [[k [_ new-val]] style-diff]
             (if-not new-val
               (.removeProperty style-obj (name k))
               (.setProperty style-obj (name k) (clj->css-property new-val))))))
-      (when-let [[_ css-prop] (get diff :z/css)]
+      (when-let [[_ css-prop] (get diff :zero.core/css)]
         (set! (.-adoptedStyleSheets dom) (->> (conj css-prop host-css) (mapv ->stylesheet-object) to-array)))
-      (when-let [listeners-diff (diff :z/on)]
+      (when-let [listeners-diff (diff :zero.core/on)]
         (patch-listeners dom listeners-diff)))
 
       ;; TODO: element internals (i.e aria, etc.)
@@ -169,7 +169,7 @@
 (defn- patch-props [^js/Node dom !instance-state props]
   (let [diff (diff-props (or (gobj/get dom PROPS-SYM) {}) props)]
     (when-not (empty? diff)
-      (when-some [listeners-diff (diff :z/on)]
+      (when-some [listeners-diff (diff :zero.core/on)]
         (patch-listeners dom listeners-diff))
       (let [fields-index (-> dom .-constructor class->fields-index)
             set-prop (fn [dom prop-key prop-value]
@@ -180,7 +180,7 @@
                            (gobj/set dom field-name adjusted-value)
                            (let [attr-name (name prop-key)
                                  component-name (or ^Keyword (.-componentName dom) (-> dom .-nodeName str/lower-case keyword))
-                                 attr-value (when (some? adjusted-value) (config/write-attribute component-name attr-name adjusted-value))]
+                                 attr-value (when (some? adjusted-value) ((config/get-attr-writer component-name) adjusted-value attr-name))]
                              (if (nil? attr-value)
                                (.removeAttribute dom attr-name)
                                (.setAttribute dom (name prop-key) attr-value))))))
@@ -224,7 +224,7 @@
             (set-prop dom k new-val)))
         
         ;; patch styles
-        (when-let [style-diff (diff :z/style)]
+        (when-let [style-diff (diff :zero.core/style)]
           (let [style-obj (.-style dom)]
             (doseq [[k [_ new-val]] style-diff]
               (if-not new-val
@@ -232,7 +232,7 @@
                 (.setProperty style-obj (name k) (clj->css-property new-val))))))
         
         ;; patch classes
-        (when-let [[_ class] (diff :z/class)]
+        (when-let [[_ class] (diff :zero.core/class)]
           ;; setting className is faster than .setAttribute, but there
           ;; doesn't seem to be a way to remove the attribute this way,
           ;; so use .removeAttribute to remove it
@@ -328,11 +328,11 @@
                         (if (-> child-dom .-nodeType (= js/Node.TEXT_NODE))
                           :text
                           (let [props (gobj/get child-dom PROPS-SYM)]
-                            [(:z/sel props) (:z/key props)])))
+                            [(:zero.core/sel props) (:zero.core/key props)])))
                       source-layout))
 
         take-el-dom (fn [tag props]
-                      (let [matcher [(:z/sel props) (:z/key props)]
+                      (let [matcher [(:zero.core/sel props) (:zero.core/key props)]
                             match (->> matcher (get @!child-doms) first)]
                         (if match
                           (do
@@ -360,9 +360,12 @@
                             (let [[tag props body] (preproc-vnode vnode)
                                   child-dom (take-el-dom tag props)
                                   old-props (gobj/get child-dom PROPS-SYM)]
-                              (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
+                              (when (or
+                                      config/disable-tags?
+                                      (nil? (:zero.core/tag props))
+                                      (not= (:zero.core/tag props) (:zero.core/tag old-props)))
                                 (patch-props child-dom !instance-state props)
-                                (when-not (:z/opaque? props)
+                                (when-not (:zero.core/opaque? props)
                                   (patch-children child-dom !instance-state body)))
                               child-dom)
 
@@ -410,10 +413,13 @@
 
                        :else
                        [{} (list vnode)])]
-    (when (or config/disable-tags? (nil? (:z/tag props)) (not= (:z/tag props) (:z/tag old-props)))
+    (when (or
+            config/disable-tags?
+            (nil? (:zero.core/tag props))
+            (not= (:zero.core/tag props) (:zero.core/tag old-props)))
       (patch-root-props dom internals
-        (update props :z/css #(cond (coll? %) (into default-css %) (some? %) (conj default-css %) :else default-css)))
-      (when-not (:z/opaque? props)
+        (update props :zero.core/css #(cond (coll? %) (into default-css %) (some? %) (conj default-css %) :else default-css)))
+      (when-not (:zero.core/opaque? props)
         (patch-children dom !instance-state body)))))
 
 (defn- normalize-prop-spec [prop-name prop-spec]
@@ -511,7 +517,8 @@
                                 [(:attr prop-spec) prop-spec])))
                           (into {}))
         init-props (fn [^js/Node instance]
-                     (let [!instance-state (gobj/get instance PRIVATE-SYM)]
+                     (let [!instance-state (gobj/get instance PRIVATE-SYM)
+                           attr-reader (config/get-attr-reader component-name)]
                        (doseq [prop-spec normalized-prop-specs
                                :when (not (contains? (:props @!instance-state) (:prop prop-spec)))]
                          (cond
@@ -539,7 +546,7 @@
 
                            (:attr prop-spec)
                            (swap! !instance-state assoc-in [:props (:prop prop-spec)]
-                             (some->> (.getAttribute instance (:attr prop-spec)) (config/read-attribute component-name (:attr prop-spec))))
+                             (attr-reader (.getAttribute instance (:attr prop-spec)) (:attr prop-spec)))
 
                            :else
                            (swap! !instance-state assoc-in [:props (:prop prop-spec)] nil)))))
@@ -596,10 +603,11 @@
           #js{:value
               (fn [attr-name _old-val new-val]
                 (let [^js/Node this (js* "this")
-                      !instance-state (gobj/get this PRIVATE-SYM)]
+                      !instance-state (gobj/get this PRIVATE-SYM)
+                      attr-reader (config/get-attr-reader component-name)]
                   (when-let [prop-spec (get attr->prop-spec attr-name)]
                     (swap! !instance-state assoc-in [:props (:prop prop-spec)]
-                      (config/read-attribute component-name attr-name new-val))
+                      (attr-reader new-val attr-name))
                     (when (:connected @!instance-state)
                       (request-render this)))))
               :configurable true}})
@@ -637,7 +645,7 @@
       (init-props instance)
       (request-render instance))))
 
-(defn update-component [component-name {:keys [props view focus derive] :as things}]
+(defn update-component [component-name {:keys [props view focus] :as things}]
   (let [el-name (kw->el-name component-name)]
     (if-let [existing (js/customElements.get el-name)]
       (patch-el-class existing component-name things)
@@ -647,9 +655,7 @@
                                     this['init']()
                                 }
                             })")]
-        (gobj/set new-class PRIVATE-SYM (atom {:instances #{}}))
-        (when-let [ns (namespace component-name)]
-          (config/derive component-name (or derive (keyword ns "Component"))))
+        (gobj/set new-class PRIVATE-SYM (atom {:instances #{}})) 
         (js/Object.defineProperty (.-prototype new-class) "init"
           #js{:value
               (fn []

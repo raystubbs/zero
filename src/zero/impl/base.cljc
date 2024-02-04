@@ -1,6 +1,7 @@
 (ns zero.impl.base
+  #?(:cljs (:require-macros zero.impl.base))
   (:require
-    [clojure.string :as str]))
+   [clojure.string :as str]))
 
 (defn words [s]
   (str/split s #"\s+|(?<=[^_-])[_-]+(?=[^_-])|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"))
@@ -28,11 +29,28 @@
       coll)
     first))
 
-(defn log! [level & items]
-  #?(:cljs (case level
-             :error (apply js/console.error items)
-             :info (apply js/console.info items)
-             :debug (apply js/console.debug items))
-     :clj  (do
-             ;; FIXME: how should this be handled?  Maybe something in zero.config?
-             (print (-> level name str/upper-case) " " (str/join " " items)))))
+(defn env-type [env] (if (:ns env) :cljs :clj))
+
+#?(:clj 
+   (defmacro env-case
+     [& {:as clauses}]
+     (clojure.core/get clauses (env-type &env))))
+
+#?(:clj
+   (defmacro try-catch
+     [try-body catch-body]
+     `(env-case
+        :clj (try ~try-body (catch Throwable ~'% ~catch-body))
+        :cljs (try ~try-body (catch :default ~'% ~catch-body)))))
+
+(defn can-deref? [x]
+  #?(:cljs (satisfies? IDeref x)
+     :clj (instance? clojure.lang.IRef x)))
+
+(defn can-watch? [x]
+  #?(:cljs (satisfies? IWatchable x)
+     :clj (instance? clojure.lang.IRef x)))
+
+(defn try-deref [x]
+  (when (can-deref? x)
+    (deref x)))

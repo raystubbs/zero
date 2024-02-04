@@ -64,21 +64,8 @@ Here's an example:
             [:input :type type :value value])})
 ```
 
-## Reading Attributes
-By default, Zero simply reads attributes as strings.  But this can be configured to allow attributes to be given
-as richer structured data (e.g transit or edn).  To configure how Zero reads attributes for a particular component
-into prop values, you can define a multi-method for the particular component, or one of its ancestors (according
-to Zero's internal component hierarchy).  Here's an example:
-
-```clojure
-(defmethod zc/read-attribute :example/Button [_ attr-name attr-value]
-  (if (str/starts-with? attr-name "edn-")
-    (edn/read-string attr-value)
-    attr-value))
-```
-
-Zero's component hierarchy can also be customized via `zc/derive`, which works the same way as `clojure.core/derive`
-to mutate the internal hierarchy.
+## Reading & Writing Attributes
+TODO
 
 ## Harvesting Events
 To maintain consistency between throttled and unthrottled actions, and avoid some issues that come with propagating
@@ -175,19 +162,19 @@ Injection handlers receive a context map, representing the context in which said
 actions dispatched on an event, this context will look like this:
 
 ```clojure
-{:z.event/data (comment "data harvested from the event")
- :z.event/target (comment "event target at time of action dispatch")
- :z.event/current (comment "event currentTarget at time of action dispatch")
- :z/event (comment "the event with which the action was dispatched")
- :z/host (comment "if :z/root is a ShadowRoot, then its host; generally this is the current component's DOM node")
- :z/root (comment "the root node of :z/event.current, usually the ShadowRoot of the current component")}
+{:zero.core/event.data (comment "data harvested from the event")
+ :zero.core/event.target (comment "event target at time of action dispatch")
+ :zero.core/event.current (comment "event currentTarget at time of action dispatch")
+ :zero.core/event (comment "the event with which the action was dispatched")
+ :zero.core/host (comment "if :z/root is a ShadowRoot, then its host; generally this is the current component's DOM node")
+ :zero.core/root (comment "the root node of :z/event.current, usually the ShadowRoot of the current component")}
 ```
 
 For injections in a component's markup, the context will have:
 
 ```clojure
-{:z/host (comment "the DOM node of the component being rendered")
- :z/root (comment "the ShadowRoot of the component being rendered")}
+{:zero.core/host (comment "the DOM node of the component being rendered")
+ :zero.core/root (comment "the ShadowRoot of the component being rendered")}
 ```
 
 For injections bindings, the context will be empty.
