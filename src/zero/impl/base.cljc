@@ -54,3 +54,6 @@
 (defn try-deref [x]
   (when (can-deref? x)
     (deref x)))
+
+(defprotocol IDisposable
+  (dispose! [disposable]))

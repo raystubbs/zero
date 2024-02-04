@@ -29,12 +29,6 @@
   (fn [effects]
     ((apply z/act effects) nil)))
 
-(zc/reg-components
-  ::echo
-  {:inherit-doc-css? true
-   :props #{:vdom}
-   :view (fn [{:keys [vdom]}] vdom)})
-
 (defn <<act [& args]
   (apply z/<< ::act args))
 
@@ -102,47 +96,3 @@
     (if-let [ns (namespace x)]
       (str (str/replace ns #"[.]" "\\.") "-" (name x))
       (name x))))
-
-(defprotocol IDisposable
-  (-dispose [disposable]))
-
-#?(:cljs
-   (defn slotted-elements-prop [& {:keys [selector slots]}]
-     (let [slotted-selector (some-> selector css-selector)
-           slot-selector (if slots (->> slots (map #(str "slot[name=\"" (name %) "\"]")) (str/join ",")) "slot")]
-       {:state-factory
-        (fn slotted-prop-state-factory [^js/HTMLElement dom]
-          (let [shadow (.-shadowRoot dom)
-                !slotted (atom nil)
-                update-slotted! (fn update-slotted! []
-                                  (let [now-slotted (set
-                                                      (for [slot (array-seq (.querySelectorAll shadow slot-selector))
-                                                            node (array-seq (.assignedNodes slot))
-                                                            :when (or (nil? slotted-selector) (and (instance? js/HTMLElement node) (.matches node slotted-selector)))]
-                                                        node))]
-                                    (when (not= now-slotted @!slotted)
-                                      (reset! !slotted now-slotted))))
-                abort-controller (js/AbortController.)]
-            (update-slotted!)
-
-            (.addEventListener shadow "slotchange" update-slotted! #js{:signal (.-signal abort-controller)})
-            #_(.addEventListener shadow "render" update-slotted! #js{:signal (.-signal abort-controller)})
-
-            (reify
-              IDeref
-              (-deref [_]
-                @!slotted)
-
-              IWatchable
-              (-add-watch [_ k f]
-                (-add-watch !slotted k f))
-              (-remove-watch [_ k]
-                (-remove-watch !slotted k))
-
-              IDisposable
-              (-dispose [_]
-                (.abort abort-controller)))))
-
-        :state-cleanup
-        (fn slotted-prop-state-cleanup [state _]
-          (-dispose state))})))
