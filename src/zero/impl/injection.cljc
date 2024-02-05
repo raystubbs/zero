@@ -43,7 +43,7 @@
             (swap! !cache assoc cache-key r)
             r)
           (log/error :exception % :injection inj)))))
-  (-inj-equiv [^Injection inj other]
+  (-inj-equiv [^Injection inj ^Injection other]
     (and
       (instance? Injection other)
       (= (.-injector-key inj) (.-injector-key other))

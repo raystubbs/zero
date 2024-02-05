@@ -2,7 +2,7 @@
   (:require
    [zero.core :as z]
    [zero.config :as zc]
-   [zero.util :as zu]
+   [zero.extras.util :as zu]
    [zero.impl.base :refer [IDisposable dispose!]]
    [goog.object :as gobj]
    [clojure.string :as str]))

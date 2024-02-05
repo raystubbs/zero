@@ -94,7 +94,7 @@
           (try-catch
             (kill-fn)
             (log/error :msg "Error in stream cleanup fn" :stream (nth stream-ident 0) :args (nth stream-ident 1) :exception %))))))
-  (-bnd-equiv [^Binding b other]
+  (-bnd-equiv [^Binding b ^Binding other]
     (and
       (instance? Binding other)
       (= (.-stream-key b) (.-stream-key other))

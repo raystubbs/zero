@@ -108,26 +108,25 @@
         {:cache (atom {})}))))
 
 (defn- get-hierarchically [m k]
-  (log/spy :get-hier
-    (when (map? m)
-      (let [!cache (:cache (meta m))
-            cached (when !cache (get @!cache k ::not-found))]
-        (if (not= ::not-found (log/spy cached))
-          cached
-          (let [found (or
-                        (get m k)
-                        (when-let [ns (when (keyword? k) (namespace k))]
-                          (let [ns-parts (log/spy (vec (str/split (log/spy ns) #"\.")))]
-                            (reduce
-                              (fn [answer i]
-                                (if-let [v (log/spy (get m (keyword (str/join "." (subvec ns-parts 0 i)) "*")))]
-                                  (reduced v)
-                                  answer))
-                              nil
-                              (log/spy (range (count ns-parts) -1 -1))))))]
-            (when !cache
-              (swap! !cache assoc k found))
-            found))))))
+  (when (map? m)
+    (let [!cache (:cache (meta m))
+          cached (when !cache (get @!cache k ::not-found))]
+      (if (not= ::not-found cached)
+        cached
+        (let [found (or
+                      (get m k)
+                      (when-let [ns (when (keyword? k) (namespace k))]
+                        (let [ns-parts (vec (str/split ns #"\."))]
+                          (reduce
+                            (fn [answer i]
+                              (if-let [v (get m (keyword (str/join "." (subvec ns-parts 0 i)) "*"))]
+                                (reduced v)
+                                answer))
+                            nil
+                            (range (count ns-parts) -1 -1)))))]
+          (when !cache
+            (swap! !cache assoc k found))
+          found)))))
 
 (defn get-attr-reader [component-name]
   (or
