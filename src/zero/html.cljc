@@ -30,7 +30,7 @@
 
                            (and (some? v) (nil? (namespace k)))
                            (let [attr-name (name k)
-                                 attr-value (write-attribute v attr-name)]
+                                 attr-value (write-attribute v attr-name tag)]
                              (cond-> agg
                                (some? attr-value)
                                (assoc (name k) attr-value)))

@@ -180,7 +180,7 @@
                            (gobj/set dom field-name adjusted-value)
                            (let [attr-name (name prop-key)
                                  component-name (or ^Keyword (.-componentName dom) (-> dom .-nodeName str/lower-case keyword))
-                                 attr-value (when (some? adjusted-value) ((config/get-attr-writer component-name) adjusted-value attr-name))]
+                                 attr-value (when (some? adjusted-value) ((config/get-attr-writer component-name) adjusted-value attr-name component-name))]
                              (if (nil? attr-value)
                                (.removeAttribute dom attr-name)
                                (.setAttribute dom (name prop-key) attr-value))))))
@@ -544,12 +544,10 @@
                              (catch :default e
                                (js/console.error "Error initializing state prop" e)))
 
-                           (:attr prop-spec)
+                           (and (:attr prop-spec) (-> @!instance-state :props (contains? (:prop prop-spec)) not))
                            (swap! !instance-state assoc-in [:props (:prop prop-spec)]
-                             (attr-reader (.getAttribute instance (:attr prop-spec)) (:attr prop-spec)))
-
-                           :else
-                           (swap! !instance-state assoc-in [:props (:prop prop-spec)] nil)))))
+                             (some-> (.getAttribute instance (:attr prop-spec))
+                               (attr-reader (:attr prop-spec) component-name)))))))
         default-css (cond-> [DEFAULT-CSS]
                       inherit-doc-css?
                       (into (->> (js/document.querySelectorAll "link[rel=\"stylesheet\"]")
@@ -607,7 +605,8 @@
                       attr-reader (config/get-attr-reader component-name)]
                   (when-let [prop-spec (get attr->prop-spec attr-name)]
                     (swap! !instance-state assoc-in [:props (:prop prop-spec)]
-                      (attr-reader new-val attr-name))
+                      (some-> new-val
+                        (attr-reader attr-name component-name)))
                     (when (:connected @!instance-state)
                       (request-render this)))))
               :configurable true}})
@@ -632,14 +631,14 @@
     (js/Object.defineProperty
       proto
       "elementName"
-      #js{:value        (kw->el-name component-name)
-          :writable     false
+      #js{:value (kw->el-name component-name)
+          :writable false
           :configurable true})
     (js/Object.defineProperty
       proto
       "componentName"
-      #js{:value        component-name
-          :writable     false
+      #js{:value component-name
+          :writable false
           :configurable true})
     (doseq [instance (:instances @!static-state)]
       (init-props instance)
@@ -655,7 +654,7 @@
                                     this['init']()
                                 }
                             })")]
-        (gobj/set new-class PRIVATE-SYM (atom {:instances #{}})) 
+        (gobj/set new-class PRIVATE-SYM (atom {:instances #{}}))
         (js/Object.defineProperty (.-prototype new-class) "init"
           #js{:value
               (fn []
