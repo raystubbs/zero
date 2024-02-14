@@ -370,8 +370,10 @@
                               child-dom)
 
                             :else
-                            (let [child-dom (take-text-dom)]
-                              (set! (.-nodeValue child-dom) (str vnode))
+                            (let [child-dom (take-text-dom)
+                                  text-value (str vnode)]
+                              (when-not (identical? (.-nodeValue child-dom) text-value)
+                                (set! (.-nodeValue child-dom) text-value))
                               child-dom)))
                         children)
 
