@@ -44,7 +44,7 @@ tag.
        (not (str/blank? id)) (assoc :id (subs id 1))
        (not (str/blank? classes)) (assoc :zero.core/class
                                     (->> [(some-> classes (str/split #"[.]")) (:zero.core/class props)]
-                                      flatten (remove str/blank?) not-empty)))
+                                      flatten (map name) (remove str/blank?) vec not-empty)))
      body]
     (throw (ex-info "Invalid tag" {:tag tag}))))
 
