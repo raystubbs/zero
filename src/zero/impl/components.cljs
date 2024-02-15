@@ -26,6 +26,7 @@
 (defonce ^:private PRIVATE-SYM (js/Symbol "zPrivate"))
 (defonce ^:private HOST-CSS-SYM (js/Symbol "zHostCss"))
 (def ^:private DEFAULT-CSS (css ":host { display: contents; }"))
+(def ^:private JS-UNDEFINED (js* "undefined"))
 
 (defn- default-ns [tag]
   (case tag
@@ -74,6 +75,8 @@
           (swap! !class->fields-index assoc class index)
           index)))))
 
+(defonce ^:private internals-fields-index (class->fields-index js/ElementInternals))
+
 (defonce ^:private !css-links (atom #{}))
 (defonce ^:private !css-stylesheet-objects (atom {}))
 (defonce ^:private !css-href-overrides (atom {}))
@@ -109,7 +112,7 @@
     :else
     (throw (ex-info "Can't convert given object to CSSStyleSheet" {:given x}))))
 
-(defn- diff-shallow [map-a map-b]
+(defn- diff-shallow [map-a map-b ks]
   (reduce
     (fn [diff key]
       (let [val-a (get map-a key)
@@ -117,32 +120,34 @@
         (if (= val-a val-b)
           diff
           (assoc diff key [val-a val-b]))))
-    {} (set (concat (keys map-a) (keys map-b)))))
+    {} ks))
 
 (defn diff-props [old-props new-props]
-  (let [all-keys (merge old-props new-props)]
+  (let [all-keys (merge old-props new-props)
+        deep-keys [:zero.core/style :zero.core/on :zero.core/internals]]
     (as-> all-keys $
-      (dissoc $ :zero.core/style :zero.core/on)
+      (apply dissoc $ deep-keys)
       (keys $)
-      (reduce
-        (fn [diff key]
-          (let [new-val (get new-props key)
-                old-val (get old-props key)]
-            (if (= new-val old-val)
-              diff
-              (assoc diff key [old-val new-val]))))
-        {} $)
+      (diff-shallow old-props new-props $)
       (reduce
         (fn [diff key]
           (if-not (contains? all-keys key)
             diff
-            (let [inner-diff (diff-shallow (get old-props key) (get new-props key))]
+            (let [old-inner-map (get old-props key)
+                  new-inner-map (get new-props key)
+                  inner-diff (diff-shallow old-inner-map new-inner-map (keys (merge old-inner-map new-inner-map)))]
               (if (empty? inner-diff)
                 diff
                 (assoc diff key inner-diff)))))
-        $ [:zero.core/style :zero.core/on :zero.core/aria]))))
+        $ deep-keys))))
 
-(defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals _internals props]
+(defn coll->validity-flags-obj [coll]
+  (let [obj #js{}]
+    (doseq [field-name (->> coll (filter base/named?) (map (comp base/cammel-case name)))]
+      (gobj/set obj field-name true))
+    obj))
+
+(defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals internals ^js class props]
   (let [old-props (gobj/get dom PROPS-SYM)
         diff (diff-props old-props props)
         ^js host-css (or (gobj/get dom HOST-CSS-SYM)
@@ -157,10 +162,36 @@
             (if-not new-val
               (.removeProperty style-obj (name k))
               (.setProperty style-obj (name k) (clj->css-property new-val))))))
-      (when-let [[_ css-prop] (get diff :zero.core/css)]
+      (when-some [[_ css-prop] (get diff :zero.core/css)]
         (set! (.-adoptedStyleSheets dom) (->> (conj css-prop host-css) (mapv ->stylesheet-object) to-array)))
-      (when-let [listeners-diff (diff :zero.core/on)]
-        (patch-listeners dom listeners-diff)))
+      (when-some [listeners-diff (diff :zero.core/on)]
+        (patch-listeners dom listeners-diff))
+      (doseq [[k [_ new-val]] (diff :zero.core/internals)]
+        (case k
+          :zero.core/states
+          (when-some [states ^js/CustomStateSet (.-states internals)]
+            (.clear states)
+            (doseq [state-val new-val]
+              (.add states (name state-val))))
+
+          :zero.core/value
+          (when (.-formAssociated class)
+            (let [[value state] (if (map? new-val)
+                                  [(:value new-val) (:state new-val)]
+                                  [new-val nil])]
+              (.setFormValue (or value "") (or state ""))))
+
+          :zero.core/validity
+          (when (.-formAssociated class)
+            (.setValidity internals
+              (coll->validity-flags-obj (:flags new-val))
+              (or (:message new-val) JS-UNDEFINED)
+              (or (:anchor new-val) JS-UNDEFINED))
+            (when (:report? new-val)
+              (.reportValidity internals)))
+
+          (when-some [field-name (get internals-fields-index k)]
+            (gobj/set internals field-name new-val)))))
 
       ;; TODO: element internals (i.e aria, etc.)
       
@@ -403,7 +434,8 @@
       (prepare-dom-to-be-detached child-dom !instance-state))))
 
 (defn- patch-root [^js/ShadowRoot dom ^js/ElementInternals internals !instance-state vnode]
-  (let [!static-state (-> dom .-host .-constructor (gobj/get PRIVATE-SYM))
+  (let [class (-> dom .-host .-constructor)
+        !static-state (gobj/get class PRIVATE-SYM)
         default-css (:default-css @!static-state)
         old-props (gobj/get dom PROPS-SYM)
         [props body] (cond
@@ -419,7 +451,7 @@
             config/disable-tags?
             (nil? (:zero.core/tag props))
             (not= (:zero.core/tag props) (:zero.core/tag old-props)))
-      (patch-root-props dom internals
+      (patch-root-props dom internals class
         (update props :zero.core/css #(cond (coll? %) (into default-css %) (some? %) (conj default-css %) :else default-css)))
       (when-not (:zero.core/opaque? props)
         (patch-children dom !instance-state body)))))
@@ -503,7 +535,7 @@
   (when-not @!render-frame-id
     (reset! !render-frame-id (js/requestAnimationFrame render))))
 
-(defn- patch-el-class [class component-name {:keys [props view focus inherit-doc-css?]}]
+(defn- patch-el-class [class component-name {:keys [props view focus inherit-doc-css? form-associated?]}]
   (let [^js proto (.-prototype class)
         !static-state (gobj/get class PRIVATE-SYM)
         props-map (cond
@@ -563,10 +595,14 @@
     ;; remove it from the index since its fields may have changed
     (swap! !class->fields-index dissoc class)
 
-    (js/Object.defineProperty
-      class "observedAttributes"
-      #js{:value (to-array (keys attr->prop-spec))
-          :configurable true})
+    (js/Object.defineProperties
+      class
+      #js{:observedAttributes
+          #js{:value (to-array (keys attr->prop-spec))
+              :configurable true}
+          :formAssociated
+          #js{:value (boolean form-associated?)
+              :configurable true}})
 
     (js/Object.defineProperties
       proto
@@ -611,6 +647,16 @@
                         (attr-reader attr-name component-name)))
                     (when (:connected @!instance-state)
                       (request-render this)))))
+              :configurable true}
+
+          :elementName
+          #js{:value (kw->el-name component-name)
+              :writable false
+              :configurable true}
+
+          :componentName
+          #js{:value component-name
+              :writable false
               :configurable true}})
     (doseq [prop-spec (filter :field normalized-prop-specs)
             :let [prop-name (:prop prop-spec)]]
@@ -630,18 +676,6 @@
                     (when (:connected @!instance-state)
                       (request-render (js* "this")))))))
             :configurable true}))
-    (js/Object.defineProperty
-      proto
-      "elementName"
-      #js{:value (kw->el-name component-name)
-          :writable false
-          :configurable true})
-    (js/Object.defineProperty
-      proto
-      "componentName"
-      #js{:value component-name
-          :writable false
-          :configurable true})
     (doseq [instance (:instances @!static-state)]
       (init-props instance)
       (request-render instance))))
@@ -663,11 +697,12 @@
                 (let [^js this (js* "this")
                       ^js shadow (.attachShadow this #js{:mode "open" :delegatesFocus (= focus :delegate)})
                       !instance-state (atom
-                                        {:shadow                          shadow
-                                         :internals                       (.attachInternals this)
-                                         :props                           {}
+                                        {:shadow shadow
+                                         :internals (.attachInternals this)
+                                         :form-state {}
+                                         :props {}
                                          :lifecycle-event-listener-counts {}
-                                         :doms-on-focus-path              #{}})]
+                                         :doms-on-focus-path #{}})]
                   (gobj/set this PRIVATE-SYM !instance-state)
                   (.addEventListener shadow "focusin"
                     (fn [^js event]
@@ -692,7 +727,7 @@
                                   nil)
                                 (apply orig-add-event-listener type others))
                               :configurable false
-                              :writable     false}
+                              :writable false}
                           :removeEventListener
                           #js{:value
                               (fn remove-event-listener-override [type & others]
@@ -702,9 +737,9 @@
                                   nil)
                                 (apply orig-remove-event-listener type others))
                               :configurable false
-                              :writable     false}}))))
+                              :writable false}}))))
               :configurable false
-              :writable     false})
+              :writable false})
         (patch-el-class new-class component-name things)
         (js/customElements.define el-name new-class))))
   nil)

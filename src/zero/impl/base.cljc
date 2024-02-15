@@ -1,7 +1,10 @@
 (ns zero.impl.base
   #?(:cljs (:require-macros zero.impl.base))
   (:require
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  #?(:clj
+     (:import
+       (clojure.lang Named))))
 
 (defn words [s]
   (str/split s #"\s+|(?<=[^_-])[_-]+(?=[^_-])|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"))
@@ -57,3 +60,7 @@
 
 (defprotocol IDisposable
   (dispose! [disposable]))
+
+(defn named? [x]
+  #?(:cljs (satisfies? INamed x)
+     :clj (instance? Named x)))
