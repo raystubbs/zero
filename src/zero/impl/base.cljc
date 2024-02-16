@@ -62,5 +62,6 @@
   (dispose! [disposable]))
 
 (defn named? [x]
-  #?(:cljs (satisfies? INamed x)
-     :clj (instance? Named x)))
+  (or (string? x)
+    #?(:cljs (satisfies? INamed x)
+       :clj (instance? Named x))))
