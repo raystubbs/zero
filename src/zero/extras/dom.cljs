@@ -56,6 +56,9 @@
                                 (.abort aborter))
                               (let [aborter (js/AbortController.)
                                     target-doms (cond
+                                                  (nil? target)
+                                                  [(-> ev .-target .-host .-parentElement)]
+
                                                   (instance? js/Node target)
                                                   [target]
 
