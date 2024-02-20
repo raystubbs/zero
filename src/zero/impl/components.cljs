@@ -20,7 +20,6 @@
 
 (defonce ^:private PROPS-SYM (js/Symbol "zProps"))
 (defonce ^:private LISTENER-ABORT-CONTROLLERS-SYM (js/Symbol "zListenerAbortControllers"))
-(defonce ^:private MARK-SYM (js/Symbol "zMark"))
 (defonce ^:private HTML-NS "http://www.w3.org/1999/xhtml")
 (defonce ^:private SVG-NS "http://www.w3.org/2000/svg")
 (defonce ^:private PRIVATE-SYM (js/Symbol "zPrivate"))

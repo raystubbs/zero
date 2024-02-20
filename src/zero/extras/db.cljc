@@ -1,4 +1,5 @@
 (ns zero.extras.db
+  (:refer-clojure :exclude [get])
   (:require
     [zero.config :as zc]))
 

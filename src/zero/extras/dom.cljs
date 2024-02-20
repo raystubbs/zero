@@ -3,7 +3,7 @@
    [zero.core :as z]
    [zero.config :as zc]
    [zero.extras.util :as zu]
-   [zero.impl.base :refer [IDisposable dispose!]]
+   [zero.impl.base :refer [IDisposable dispose! can-watch?]]
    [goog.object :as gobj]
    [clojure.string :as str]))
 
@@ -43,8 +43,11 @@
 (zc/reg-components
   ::echo
   {:inherit-doc-css? true
-   :props #{:vdom}
-   :view (fn [{:keys [vdom]}] vdom)}
+   :props #{:vdom :vdom-ref}
+   :view (fn [{:keys [vdom vdom-ref]}]
+           (if (can-watch? vdom-ref)
+             [::echo :vdom vdom-ref]
+             vdom))}
 
   ::listen
   {:props #{:target :event :action}
@@ -66,9 +69,11 @@
                                                   (vec (array-seq target))
                                                   
                                                   (or (string? target) (keyword? target))
-                                                  (.querySelectorAll
-                                                    (-> ev .-currentTarget .-host .getRootNode)
-                                                    (zu/css-selector target)))]
+                                                  (-> ev .-currentTarget .-host .getRootNode
+                                                    (.querySelectorAll
+                                                      (zu/css-selector target))
+                                                    array-seq vec))]
+                                (js/console.log target-doms)
                                 (gobj/set (.-currentTarget ev) LISTENER-ABORTER-SYM aborter)
                                 (doseq [^js/Node dom target-doms]
                                   (.addEventListener dom (name event) action #js{:signal (.-signal aborter)}))))
