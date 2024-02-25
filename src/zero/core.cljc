@@ -3,9 +3,12 @@
    [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
    [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
    [zero.impl.injection #?@(:cljs [:refer [Injection]])]
+   [zero.impl.base #?@(:cljs [:refer [IDisposable dispose!]])]
+   [zero.impl.logger :as log]
    [zero.impl.markup :as markup]
-   #?(:cljs [zero.impl.components])
-   [zero.config :as config])
+   #?(:cljs [zero.impl.components :as c])
+   [zero.config :as config]
+   [clojure.string :as str])
   #?(:clj
      (:import
        (zero.impl.actions Action)
@@ -184,3 +187,178 @@ for a component with this name.
 (defn map->bnd
   [m]
   (Binding. (into {} (:props m)) (:key m) (vec (:args m))))
+
+(defn css-selector [x]
+  (cond
+    (string? x)
+    x
+
+    (keyword? x)
+    (if-let [ns (namespace x)]
+      (str (str/replace ns #"[.]" "\\.") "-" (name x))
+      (name x))
+    
+    (vector? x)
+    (str/join " " (map css-selector x))))
+
+(defn <<act [& args]
+  (apply << ::act args))
+
+(defn <<ctx [& path]
+  (apply << ::ctx path))
+
+(defn <<< [& args]
+  (apply << ::<< args))
+
+#?(:cljs
+   (do
+     (defn bind [k ^js/Node dom prop-name watchable]
+       (c/bind k dom prop-name watchable))
+     
+     (defn unbind [k]
+       (c/unbind k))
+     
+     (defn listen [k ^js/Node dom-or-doms event-name listener-fn & {:keys [once? capture? passive? signal] :as opts}]
+       (c/listen k dom-or-doms event-name listener-fn opts))
+     
+     (defn unlisten [k]
+       (c/unlisten k)) 
+     
+     (config/reg-effects
+       ::cond
+       (fn [& clauses]
+         (let [paired-clauses (partition-all 2 clauses)]
+           (loop [remaining paired-clauses]
+             (if (empty? remaining)
+               nil
+               (let [[test action :as clause] (first remaining)]
+                 (when (not= 2 (count clause))
+                   (throw (ex-info "Uneven number of items in :zero.core/cond" {:items clauses})))
+                 (if test
+                   (action {})
+                   (recur (rest remaining))))))))
+       
+       ::case
+       (fn [v & {:as cases}]
+         (when-let [action (get cases v (get cases :default))]
+           (action {})))
+       
+       ::listen c/listen
+       ::unlisten c/unlisten
+       ::bind c/bind
+       ::unbind c/unbind)
+     
+     (config/reg-injections
+       ::ctx
+       (fn [ctx & path]
+         (get-in ctx path))
+
+       ::act
+       (fn [_ & args]
+         (apply act args))
+
+       ::<<
+       (fn [_ & args]
+         (apply << args))
+
+       ::select-doms
+       (fn [{root ::root} selector & {:keys [^js/Node from default]}]
+         (or
+           (some-> (.querySelectorAll (or from root) (css-selector selector)) vec not-empty)
+           default))
+
+       ::select-dom
+       (fn [{root ::root} selector & {:keys [^js/Node from default]}]
+         (or
+           (some-> (.querySelector (or from root) (css-selector selector)))
+           default))
+
+       ::host-parent-dom
+       (fn [{^js/Node host ::host}]
+         (.-parentElement host))
+       
+       ::host-root-dom
+       (fn [{^js/Node host ::host}]
+         (.getRootNode host)))
+
+     (config/reg-components
+       ::echo
+       {:props #{:vdom}
+        :view (fn [{:keys [vdom]}]
+                vdom)}
+       
+       ::listen
+       {:props #{:sel :evt :act}
+        :view (fn [{:keys [sel evt] action :act :as props}]
+                [:root>
+                 ::style {:display "none"}
+                 ::on {:connect (act
+                                  [::listen
+                                   (<<ctx ::host)
+                                   (<< ::select-doms sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
+                                   evt action])
+                       :update (act
+                                 [::unlisten (<<ctx ::host)]
+                                 [::listen
+                                  (<<ctx ::host)
+                                  (<< ::select-doms sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
+                                  evt action])
+                       :disconnect (act [::unlisten (<<ctx ::host)])}])}
+       
+       ::bind
+       {:props #{:sel :prop :ref}
+        :view (fn [{:keys [sel prop ref]}]
+                [:root>
+                 ::style {:display "none"}
+                 ::on {:connect (act
+                                  [::bind
+                                   (<<ctx ::host)
+                                   (<< ::select-dom sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
+                                   prop ref])
+                       :update (act
+                                 [::unbind (<<ctx ::host)]
+                                 [::bind
+                                  (<<ctx ::host)
+                                  (<< ::select-dom sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
+                                  prop ref])
+                       :disconnect (act [::unbind (<<ctx ::host)])}])})
+     
+     (defn slotted-prop [& {:keys [selector slots]}]
+       (let [slotted-selector (some-> selector css-selector)
+             slot-selector (if slots (->> slots (map #(str "slot[name=\"" (name %) "\"]")) (str/join ",")) "slot")]
+         {:state-factory
+          (fn slotted-prop-state-factory [^js/HTMLElement dom]
+            (let [shadow (.-shadowRoot dom)
+                  !slotted (atom nil)
+                  update-slotted! (fn update-slotted! []
+                                    (let [now-slotted (set
+                                                        (for [slot (array-seq (.querySelectorAll shadow slot-selector))
+                                                              node (array-seq (.assignedNodes slot))
+                                                              :when (or (nil? slotted-selector) (and (instance? js/HTMLElement node) (.matches node slotted-selector)))]
+                                                          node))]
+                                      (when (not= now-slotted @!slotted)
+                                        (reset! !slotted now-slotted))))
+                  abort-controller (js/AbortController.)]
+              (update-slotted!)
+     
+              (.addEventListener shadow "slotchange" update-slotted! #js{:signal (.-signal abort-controller)})
+              #_(.addEventListener shadow "render" update-slotted! #js{:signal (.-signal abort-controller)})
+     
+              (reify
+                IDeref
+                (-deref [_]
+                  @!slotted)
+     
+                IWatchable
+                (-add-watch [_ k f]
+                  (-add-watch !slotted k f))
+                (-remove-watch [_ k]
+                  (-remove-watch !slotted k))
+     
+                IDisposable
+                (dispose! [_]
+                  (.abort abort-controller)))))
+     
+          :state-cleanup
+          (fn slotted-prop-state-cleanup [state _]
+            (dispose! state))}))))

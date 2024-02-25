@@ -1,4 +1,4 @@
-(ns zero.extras.dom
+(ns ^:deprecated zero.extras.dom
   (:require
    [zero.core :as z]
    [zero.config :as zc]
@@ -43,11 +43,9 @@
 (zc/reg-components
   ::echo
   {:inherit-doc-css? true
-   :props #{:vdom :vdom-ref}
-   :view (fn [{:keys [vdom vdom-ref]}]
-           (if (can-watch? vdom-ref)
-             [::echo :vdom vdom-ref]
-             vdom))}
+   :props #{:vdom}
+   :view (fn [{:keys [vdom]}]
+           vdom)}
 
   ::listen
   {:props #{:target :event :action}

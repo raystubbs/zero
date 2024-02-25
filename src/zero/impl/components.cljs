@@ -9,17 +9,10 @@
     [goog.object :as gobj]
     [goog :refer [DEBUG]]))
 
-;; generic unique id seq
-(defonce ^:private uid-seq (atom (js/BigInt 0)))
-
-(defn- gen-uid []
-  (swap! uid-seq + (js/BigInt 1)))
-
 (defn- css [s]
   (doto (js/CSSStyleSheet.) (.replaceSync s)))
 
 (defonce ^:private PROPS-SYM (js/Symbol "zProps"))
-(defonce ^:private LISTENER-ABORT-CONTROLLERS-SYM (js/Symbol "zListenerAbortControllers"))
 (defonce ^:private HTML-NS "http://www.w3.org/1999/xhtml")
 (defonce ^:private SVG-NS "http://www.w3.org/2000/svg")
 (defonce ^:private PRIVATE-SYM (js/Symbol "zPrivate"))
@@ -31,20 +24,6 @@
   (case tag
     :svg SVG-NS
     nil))
-
-(defn- patch-listeners [^js/Node dom diff]
-  (doseq [[type [old-listener new-listener]] diff]
-    (let [type-str (name type)]
-      (when old-listener
-        (let [abort-controllers (gobj/get dom LISTENER-ABORT-CONTROLLERS-SYM)
-              abort-controller (get abort-controllers [type old-listener])]
-          (.abort abort-controller)
-          (gobj/set dom LISTENER-ABORT-CONTROLLERS-SYM (dissoc abort-controllers old-listener))))
-      (when new-listener
-        (let [abort-controller (js/AbortController.)
-              abort-controllers (assoc (gobj/get dom LISTENER-ABORT-CONTROLLERS-SYM) [type new-listener] abort-controller)]
-          (gobj/set dom LISTENER-ABORT-CONTROLLERS-SYM abort-controllers)
-          (.addEventListener dom type-str new-listener #js{:signal (.-signal abort-controller)}))))))
 
 (defonce !class->fields-index (atom {}))
 
@@ -123,7 +102,7 @@
 
 (defn diff-props [old-props new-props]
   (let [all-keys (merge old-props new-props)
-        deep-keys [:zero.core/style :zero.core/on :zero.core/internals]]
+        deep-keys [:zero.core/style :zero.core/on :zero.core/internals :zero.core/bind]]
     (as-> all-keys $
       (apply dissoc $ deep-keys)
       (keys $)
@@ -146,6 +125,67 @@
       (gobj/set obj field-name true))
     obj))
 
+(defn set-prop [fields-index dom prop-name prop-value]
+  (let [adjusted-value (if (and DEBUG (= (.-nodeName dom) "LINK") (= prop-name :href))
+                         (get @!css-href-overrides prop-value prop-value)
+                         prop-value)]
+    (if-let [field-name (get fields-index prop-name)]
+      (gobj/set dom field-name adjusted-value)
+      (let [attr-name (name prop-name)
+            component-name (or ^Keyword (.-componentName dom) (-> dom .-nodeName str/lower-case keyword))
+            attr-value (when (some? adjusted-value) ((config/get-attr-writer component-name) adjusted-value attr-name component-name))]
+        (if (nil? attr-value)
+          (.removeAttribute dom attr-name)
+          (.setAttribute dom (name prop-name) attr-value))))))
+
+(defonce !binds (atom {}))
+(defonce !bound-props (atom #{}))
+
+(defn bind [k ^js/Node dom prop-name watchable]
+  (when (contains? @!binds k)
+    (throw (ex-info "Bind key already exists" {:key k})))
+  (when (contains? @!bound-props [dom prop-name])
+    (throw (ex-info "Property already bound" {:dom dom :prop-name prop-name})))
+
+  (let [fields-index (-> dom .-constructor class->fields-index)]
+    (add-watch watchable [::bind k]
+      (fn [_ _ _ x] (set-prop fields-index dom prop-name x)))
+    (swap! !binds assoc k {:watchable watchable :prop-name prop-name :dom dom})
+    (swap! !bound-props conj [dom prop-name])
+
+    ;; deref must be done _after_ add-watch to ensure that, if `new-val` is
+    ;; a binding, the underlying data stream has been booted up
+    (let [current (when (satisfies? IDeref watchable) @watchable)]
+      (set-prop fields-index dom prop-name current))))
+
+(defn unbind [k]
+  (if-let [{:keys [watchable prop-name ^js/Node dom]} (get @!binds k)]
+    (do
+      (remove-watch watchable [::bind k])
+      (swap! !binds dissoc k)
+      (swap! !bound-props disj [dom prop-name]))
+    (throw (ex-info "Bind key doesn't exist" {:key k}))))
+
+(defonce !listener-aborters (atom {}))
+
+(defn listen [k ^js/Node dom-or-doms event-name listener-fn & {:keys [once? capture? passive? signal]}]
+  (when (contains? @!listener-aborters k)
+    (throw (ex-info "Listener key already exists" {:key k})))
+  (let [aborter (js/AbortController.)]
+    (when (some? signal)
+      (.addEventListener signal "abort" (fn [_] (.abort aborter))
+        #js{:once true :signal (.-signal aborter)}))
+    (doseq [dom (cond-> dom-or-doms (not (or (coll? dom-or-doms) (instance? js/NodeList dom-or-doms))) vector)]
+      (.addEventListener dom (name event-name)
+        (if once? #(do (.abort aborter) (listener-fn %)) listener-fn)
+        #js{:once once? :capture capture? :passive passive? :signal (.-signal aborter)}))
+    (swap! !listener-aborters assoc k aborter)))
+
+(defn unlisten [k]
+  (if-let [aborter ^js/AbortController (get @!listener-aborters k)]
+    (.abort aborter)
+    (throw (ex-info "Listener key doesn't exist" {:key k}))))
+
 (defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals internals ^js class props]
   (let [old-props (gobj/get dom PROPS-SYM)
         diff (diff-props old-props props)
@@ -163,8 +203,15 @@
               (.setProperty style-obj (name k) (clj->css-property new-val))))))
       (when-some [[_ css-prop] (get diff :zero.core/css)]
         (set! (.-adoptedStyleSheets dom) (->> (conj css-prop host-css) (mapv ->stylesheet-object) to-array)))
-      (when-some [listeners-diff (diff :zero.core/on)]
-        (patch-listeners dom listeners-diff))
+      
+      ;; patch listeners
+      (doseq [[k [old-val new-val]] (diff :zero.core/on)]
+        (when (some? old-val)
+          (unlisten [old-val dom k]))
+        (when (some? new-val)
+          (listen [new-val dom k] dom k new-val)))
+      
+      ;; patch internals
       (doseq [[k [_ new-val]] (diff :zero.core/internals)]
         (case k
           :zero.core/states
@@ -196,62 +243,29 @@
       
     (gobj/set dom PROPS-SYM props)))
 
-(defn- patch-props [^js/Node dom !instance-state props]
+(defn- patch-props [^js/Node dom props]
   (let [diff (diff-props (or (gobj/get dom PROPS-SYM) {}) props)]
     (when-not (empty? diff)
-      (when-some [listeners-diff (diff :zero.core/on)]
-        (patch-listeners dom listeners-diff))
       (let [fields-index (-> dom .-constructor class->fields-index)
-            set-prop (fn [dom prop-key prop-value]
-                       (let [adjusted-value (if (and DEBUG (= (.-nodeName dom) "LINK") (= prop-key :href))
-                                              (get @!css-href-overrides prop-value prop-value)
-                                              prop-value)]
-                         (if-let [field-name (get fields-index prop-key)]
-                           (gobj/set dom field-name adjusted-value)
-                           (let [attr-name (name prop-key)
-                                 component-name (or ^Keyword (.-componentName dom) (-> dom .-nodeName str/lower-case keyword))
-                                 attr-value (when (some? adjusted-value) ((config/get-attr-writer component-name) adjusted-value attr-name component-name))]
-                             (if (nil? attr-value)
-                               (.removeAttribute dom attr-name)
-                               (.setAttribute dom (name prop-key) attr-value))))))
             normal-props-diff (remove (comp namespace key) diff)]
-        (doseq [[k [old-val new-val]] normal-props-diff]
-          ;; when a binding expires
-          (when (satisfies? IWatchable old-val)
-            (let [binders (disj (get-in @!instance-state [:binds old-val :binders]) [dom k])]
-              (cond
-                (empty? binders)
-                (do
-                  (remove-watch old-val (get-in @!instance-state [:binds old-val :uid]))
-                  (swap! !instance-state update :binds dissoc old-val))
-                
-                :else
-                (swap! !instance-state assoc-in [:binds old-val :binders] binders))))
-          
-          ;; now set the actual prop, setting up a new
-          ;; binding if necessary
-          (cond
-            (satisfies? IWatchable new-val)
-            (if-let [existing (get-in @!instance-state [:binds new-val])]
-              (do
-                (swap! !instance-state update-in [:binds new-val :binders] conj [dom k])
-                (set-prop dom k (:current existing)))
-              (let [watch-uid (gen-uid)]
-                (add-watch
-                  new-val watch-uid
-                  (fn [_ _ _ x]
-                    (swap! !instance-state assoc-in [:binds new-val :current] x)
-                    (doseq [[binder-dom binder-prop] (get-in @!instance-state [:binds new-val :binders])]
-                      (set-prop binder-dom binder-prop x))))
-                ;; deref must be done _after_ add-watch to ensure that, if `new-val` is
-                ;; a binding, the underlying data stream has been booted up
-                (let [current (when (satisfies? IDeref new-val) @new-val)]
-                  (swap! !instance-state assoc-in [:binds new-val]
-                    {:uid watch-uid :current current :binders #{[dom k]}})
-                  (set-prop dom k current))))
+        
+        ;; normal props
+        (doseq [[k [_old-val new-val]] normal-props-diff] 
+          (set-prop fields-index dom k new-val))
 
-            :else
-            (set-prop dom k new-val)))
+        ;; patch listeners
+        (doseq [[k [old-val new-val]] (diff :zero.core/on)]
+          (when (some? old-val)
+            (unlisten [old-val dom k]))
+          (when (some? new-val)
+            (listen [new-val dom k] dom k new-val)))
+
+        ;; patch binds
+        (doseq [[k [old-val new-val]] (diff :zero.core/bind)]
+          (when (some? old-val)
+            (unbind [old-val dom k]))
+          (when (some? new-val)
+            (bind [new-val dom k] dom k new-val)))
         
         ;; patch styles
         (when-let [style-diff (diff :zero.core/style)]
@@ -260,7 +274,7 @@
               (if-not new-val
                 (.removeProperty style-obj (name k))
                 (.setProperty style-obj (name k) (clj->css-property new-val))))))
-        
+
         ;; patch classes
         (when-let [[_ class] (diff :zero.core/class)]
           ;; setting className is faster than .setAttribute, but there
@@ -277,27 +291,11 @@
             (set! (.-className dom) (str class))))
         (gobj/set dom PROPS-SYM props)))))
 
-(defn- prepare-dom-to-be-detached [^js/Node dom !instance-state]
-  ;; replace all bindings with their current value
-  (gobj/set dom PROPS-SYM
-    (persistent!
-      (reduce-kv
-        (fn [new-props k v]
-          (if (or (not (satisfies? IWatchable v)) (some? (namespace k)))
-            new-props
-            (let [current (get-in @!instance-state [:binds v :current])
-                  binders (disj (get-in @!instance-state [:binds v :binders]) [dom k])]
-              (cond
-                (empty? binders)
-                (do
-                  (remove-watch v (get-in @!instance-state [:binds v :uid]))
-                  (swap! !instance-state update :binds dissoc v))
-
-                :else
-                (swap! !instance-state assoc-in [:binds v :binders] binders))
-              (assoc! new-props k current))))
-        (transient (or (gobj/get dom PROPS-SYM) {}))
-        (gobj/get dom PROPS-SYM))))
+(defn- prepare-dom-to-be-detached [^js/Node dom !instance-state] 
+  (let [props (gobj/get dom PROPS-SYM)]
+    (doseq [[k watchable] (:zero.core/bind props)]
+      (unbind [watchable dom k]))
+    (gobj/set dom PROPS-SYM (dissoc props :zero.core/bind)))
   (doseq [child-dom (-> dom .-childNodes array-seq)]
     (prepare-dom-to-be-detached child-dom !instance-state))
   (when (and DEBUG (= (.-nodeName dom) "LINK"))
@@ -394,7 +392,7 @@
                                       config/disable-tags?
                                       (nil? (:zero.core/tag props))
                                       (not= (:zero.core/tag props) (:zero.core/tag old-props)))
-                                (patch-props child-dom !instance-state props)
+                                (patch-props child-dom props)
                                 (when-not (:zero.core/opaque? props)
                                   (patch-children child-dom !instance-state body)))
                               child-dom)
@@ -608,10 +606,8 @@
       #js{:connectedCallback
           #js{:value
               (fn []
-                (let [^js/Node this (js* "this")
-                      !instance-state (gobj/get this PRIVATE-SYM)]
-                  (swap! !static-state update :instances conj this)
-                  (swap! !instance-state assoc :binds {})
+                (let [^js/Node this (js* "this")]
+                  (swap! !static-state update :instances conj this) 
                   (init-props this)
                   (request-render this)))
               :configurable true}
@@ -630,8 +626,7 @@
                     (cleanup-fn))
                   (swap! !instance-state assoc :cleanup-fns #{})
                   (doseq [^js/Node child-dom (-> shadow .-childNodes array-seq)]
-                    (prepare-dom-to-be-detached child-dom !instance-state))
-                  (assert (= {} (:binds @!instance-state)))))
+                    (prepare-dom-to-be-detached child-dom !instance-state))))
               :configurable true}
 
           :attributeChangedCallback
