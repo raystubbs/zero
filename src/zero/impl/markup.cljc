@@ -1,6 +1,7 @@
 (ns zero.impl.markup
   (:require
-    [clojure.string :as str]))
+   [clojure.string :as str]
+   [zero.impl.base :refer [can-watch?]]))
 
 (defn flatten-body [body]
   (mapcat
@@ -44,7 +45,7 @@ tag.
        (not (str/blank? id)) (assoc :id (subs id 1))
        (not (str/blank? classes)) (assoc :zero.core/class
                                     (->> [(some-> classes (str/split #"[.]")) (:zero.core/class props)]
-                                      flatten (remove str/blank?) not-empty)))
+                                      flatten (map name) (remove str/blank?) vec not-empty)))
      body]
     (throw (ex-info "Invalid tag" {:tag tag}))))
 
@@ -52,13 +53,27 @@ tag.
   (extract-tag-props
     [:div#my-thing.foo.bar {:zero.core/class "something"} (list "body")]))
 
+;; TODO: remove this eventually
+(defn move-binds "
+Putting watchable things to be bound to props in place of the
+prop values is now deprecated.  Binds should now be put
+into `::z/bind`.  However, to avoid breaking existing
+code; we'll automatically move any watchable things found in
+the props into the `::z/bind` map.
+" [props]
+  (let [{binds true other false} (group-by can-watch? props)]
+    (cond-> (into {} other)
+      (seq binds)
+      (update :zero.core/bind (fnil into {}) binds))))
+
 (defn preproc-vnode "
 Simplifies the vnode, parsing out the classes and id from
 the tag, and converting compound tags (i.e `[:div :span]`)
 into nested vnodes, and accumulating the whole body into
 one sequence.
 " [vnode]
-  (let [[tag-or-tags props body] (normalize-vnode vnode)]
+  (let [[tag-or-tags props body] (normalize-vnode vnode)
+        props (move-binds props)]
     (->
       (cond
         (keyword? tag-or-tags)

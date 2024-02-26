@@ -40,10 +40,6 @@ pairs, with the `:view` option being the only one required.  Here's what each op
     for components that wrap native input elements.
   + `:self` - Causes Zero to attach an implicit `tabIndex = 0` to instances of the component if the field hasn't
     been set to something else explicitly.  This makes the component focusable.
-  + `:derive` - Zero uses Clojure's hierarchy system for configuring some component specific setup.  If the component
-    name is namespaced (e.g `:example/foo`) then Zero will automatically `derive` the component name from `example/Component`
-    (in an internal hierarchy), so components under a particular namespace can be configured in bulk.  This property
-    allows the component's parent to be given explicitly.  Ignored if the component name isn't namespaced.
 
 Here's an example:
 ```clojure
@@ -68,19 +64,7 @@ Here's an example:
 TODO
 
 ## Harvesting Events
-To maintain consistency between throttled and unthrottled actions, and avoid some issues that come with propagating
-events through shadow DOMs, Zero usually waits until the event that triggered an action is stale before evaluating
-an actions injections, or dispatching its side effects.  But often the data an event contains will change or become
-inaccessible as it propagates through the DOM; so we need a way to capture said data preemptively.  By default, Zero
-will do its best to harvest the most interesting data from event types it knows about, this data is made available
-in the `z.event/data` property of an action's context.  But Zero's built-in event harvesting capabilities will
-inevitably fall short.  The event harvesting for a particular event `.type` can be overridden by implementing a
-`zc/harvet-event` method for said type.
-
-```clojure
-(defmethod zc/harvest-event :input [^js/Event ev]
-  (-> ev .-target .-value))
-```
+TODO
 
 ## Data Streams and Bindings
 TODO: make this better

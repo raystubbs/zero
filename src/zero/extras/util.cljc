@@ -6,6 +6,7 @@
    [zero.impl.base :refer [try-catch try-deref]]
    [zero.impl.logger :as log]))
 
+;; deprecated
 (zc/reg-injections
   ::ctx
   (fn [context & path]
@@ -19,6 +20,7 @@
   (fn [_ & args]
     (apply z/<< args)))
 
+;; deprecated
 (zc/reg-effects
   ::cond
   (fn [& cases]
@@ -29,13 +31,13 @@
   (fn [effects]
     ((apply z/act effects) nil)))
 
-(defn <<act [& args]
+(defn ^:deprecated <<act [& args]
   (apply z/<< ::act args))
 
-(defn <<ctx [& path]
+(defn ^:deprecated <<ctx [& path]
   (apply z/<< ::ctx path))
 
-(defn <<< [& args]
+(defn ^:deprecated <<< [& args]
   (apply z/<< ::<< args))
 
 (defn derived [f & deps]
@@ -87,12 +89,4 @@
       (fn [_ _ _ new-val]
         (on-deps new-val)))))
 
-(defn css-selector [x]
-  (cond
-    (string? x)
-    x
-
-    (keyword? x)
-    (if-let [ns (namespace x)]
-      (str (str/replace ns #"[.]" "\\.") "-" (name x))
-      (name x))))
+(def ^:deprecated css-selector z/css-selector)

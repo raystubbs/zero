@@ -37,7 +37,7 @@ property name (the prop name converted to cammelCase) then that property will be
 set to the prop value, otherwise the value will be stringified and set as an attribute
 on the element, with the same name as the prop.
 
-As a convenient short-hand, an ID and classes can be included in the node's tag.
+As a convenient shorthand, an ID and classes can be included in the node's tag.
 ```clojure
 [:div#my-thing.foo.bar "I'm a DIV"]
 ```
@@ -78,6 +78,12 @@ This prop allows event handlers to be declaratively attached to the target eleme
 ```
 
 Either keywords or strings can be used for the event name, but they shouldn't be mixed.
+
+### `:zero.core/bind`
+This should be given as a map of `prop-name -> watchable`.  The `watchable` will
+be bound to the named prop; so when its value changes, so the prop will be updated
+accordingly.  If the `watchable` can also be deref'd, then it'll be deref'd for
+an initial value.
 
 ### `:zero.core/style`
 This prop allows an inline style for the element to be given as a map.

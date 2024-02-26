@@ -27,7 +27,7 @@
 
          ("input" "change")
          (let [target (.-target event)]
-           (when (instance? js/HTMLInputElement target)
+           (when (or (instance? js/HTMLInputElement target) (instance? js/HTMLTextAreaElement target))
              (case (.-type target)
                "checkbox"
                (.-checked target)
@@ -36,6 +36,11 @@
                (-> target .-files array-seq vec)
 
                (.-value target))))
+
+         "submit"
+         (let [target (.-target event)]
+           (when (instance? js/HTMLFormElement target)
+             (js/FormData. target)))
 
          ("drop")
          (->> event .-dataTransfer .-items array-seq

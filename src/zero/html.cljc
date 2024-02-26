@@ -1,9 +1,10 @@
 (ns zero.html
   (:require
-    [clojure.string :as str]
-    [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name flatten-body]]
-    [zero.impl.injection :refer [apply-injections]]
-    [zero.config :as zconfig]))
+   [clojure.string :as str]
+   [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name flatten-body]]
+   [zero.impl.injection :refer [apply-injections]]
+   [zero.core :as z]
+   [zero.config :as zconfig]))
 
 (declare html)
 
@@ -39,6 +40,9 @@
                            agg))
                        {}
                        props)
+          html-attrs (cond-> html-attrs
+                       (and (nil? (get html-attrs "id")) (or (some? (::z/bind props)) (some? (::z/on props))))
+                       (assoc "id" (name (gensym))))
           html-tag (kw->el-name tag)]
       (str
         "<" html-tag
@@ -48,8 +52,29 @@
               (map #(str (key %) "=\"" (str/replace (str (val %)) #"\"" "&quot;") "\""))
               (str/join " "))))
         ">"
-        (->> body (map vnode->html) str/join)
-        "</" html-tag ">"))
+        (cond
+          (= "script" html-tag)
+          (->> body str/join)
+          
+          :else
+          (->> body (map vnode->html) str/join))
+        "</" html-tag ">"
+        (->>
+          (concat
+            (map
+              (fn [[k v]]
+                [::z/listen {:sel (str "#" (get html-attrs "id"))
+                             :evt k
+                             :act v}])
+              (::z/on props))
+            (map
+              (fn [[k v]]
+                [::z/bind {:sel (str "#" (get html-attrs "id"))
+                           :prop k
+                           :ref v}])
+              (::z/bind props)))
+          (map vnode->html)
+          str/join)))
 
     :else
     (-> vnode str (str/replace #"[<>]" #(case % "<" "&gt;" ">" "&lt;")))))

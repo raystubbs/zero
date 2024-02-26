@@ -1,9 +1,9 @@
-(ns zero.extras.dom
+(ns ^:deprecated zero.extras.dom
   (:require
    [zero.core :as z]
    [zero.config :as zc]
    [zero.extras.util :as zu]
-   [zero.impl.base :refer [IDisposable dispose!]]
+   [zero.impl.base :refer [IDisposable dispose! can-watch?]]
    [goog.object :as gobj]
    [clojure.string :as str]))
 
@@ -44,7 +44,8 @@
   ::echo
   {:inherit-doc-css? true
    :props #{:vdom}
-   :view (fn [{:keys [vdom]}] vdom)}
+   :view (fn [{:keys [vdom]}]
+           vdom)}
 
   ::listen
   {:props #{:target :event :action}
@@ -56,6 +57,9 @@
                                 (.abort aborter))
                               (let [aborter (js/AbortController.)
                                     target-doms (cond
+                                                  (nil? target)
+                                                  [(-> ev .-target .-host .-parentElement)]
+
                                                   (instance? js/Node target)
                                                   [target]
 
@@ -63,9 +67,11 @@
                                                   (vec (array-seq target))
                                                   
                                                   (or (string? target) (keyword? target))
-                                                  (.querySelectorAll
-                                                    (-> ev .-currentTarget .-host .getRootNode)
-                                                    (zu/css-selector target)))]
+                                                  (-> ev .-currentTarget .-host .getRootNode
+                                                    (.querySelectorAll
+                                                      (zu/css-selector target))
+                                                    array-seq vec))]
+                                (js/console.log target-doms)
                                 (gobj/set (.-currentTarget ev) LISTENER-ABORTER-SYM aborter)
                                 (doseq [^js/Node dom target-doms]
                                   (.addEventListener dom (name event) action #js{:signal (.-signal aborter)}))))

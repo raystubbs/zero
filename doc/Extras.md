@@ -5,71 +5,11 @@ for their particular project; without introducing a lot of unnecessary fluff.
 
 But for many projects, our requirements aren't that complicated, and we don't need to
 build everything custom.  It's sometimes nice to just have what we need to get started
-on a project, without doing a lot of groundwork. So Zero also comes with a set of optional
-extras in `zero.extras.*`, which may make building with Zero that much easier.
+on a project, without doing a lot of extra groundwork. So Zero also comes with a set of
+optional extras in `zero.extras.*`, which may make building with Zero that much easier.
 
 ## `zero.extras.util`
-This module sets up a basic set of Zero registrations, as well providing some useful
-utility functions.
-
-### Injections
-
-- `:ze/ctx`
-  
-  Resolves a path against the injector context.  So `(<< :ze/ctx :zero.core/host)` grabs
-  `:zero.core/host` from the context, and `(<< :ze/ctx :zero.core/event.data :foo)` does
-  `(get-in ctx [:zero.core/event.data :foo])`.
-
-
-- `:ze/<<`
-  
-  Injects an _injection_.  This creates a level of indirection.  Useful to avoid resolving the
-  inner injection on action dispatch, when passing markup into an action's effect.  This comes
-  with a utility function `<<<` which offers better aesthetics.  So `(<<< :something)` is
-  equivalent to `(<< :ze/<< :something)`.
-
-
-- `:ze/act`
-  
-  Injects an _action_.  This is useful when passing markup that includes nested actions that
-  depend on data from the constructing context, into an action's effect.  Since injections in
-  regular `(act ...)` actions will be resolved when said action is dispatched, in the dispatch
-  context; not the constructing context.  This also comes with a utility function `<<act` for
-  better aesthetics.  So `(<<act [:something (<< :foo)])` is equivalent to `(<< :ze/act [:something (<< :foo)])`.
-
-
-### Effects
-
-- `:ze/cond`
-  
-  Conditionally invokes effects.  Given a sequence of `[test ...effects]` vectors, invokes the
-  effects from the first truthy `test`.
-
-  ```clojure
-  (act [:ze/cond
-        [(<< :something?) [:do-something]]
-        [(<< :otherthing?) [:do-otherthing]]])
-  ```
-
-- `:ze/effects`
-
-  Takes and invokes a sequence of effects.
-
-  ```clojure
-  (act [:ze/effects [[:do-something] [:do-otherthing]]])
-  ```
-
-### Components
-
-- `:ze/echo`
-
-  A component which takes some Zero markup as a prop, and renders it.
-
-  ```clojure
-  [:ze/echo :vdom [:div "Hello, World!"]]
-  ```
-
-### Functions
+This module provides a few useful utility functions.
 
 - `(derived f & deps)`
 
@@ -99,33 +39,6 @@ utility functions.
   
   Removes a watcher registered with `watch`.
 
-
-- `(css-selector selector)`
-
-  If given a keyword, converts the keyword of the form `:my.example/my-component#id.class1.class2`
-  into the appropriate CSS selector string; in this case `my\.example-my-component#id.class1.class2`.
-
-
-- `(slotted-elements-prop & {:keys [selector slots})`
-  
-  Creates a _state factory_ prop which produces a state object with a set of elements currently slotted
-  in `<slot>` elements within the component.  If a `selector` is provided, it's used to filter the
-  included elements.  If a `slots` option is given, only elements in slots with the given names
-  are included.  This is useful to allow a component's markup to react to whether an element is
-  currently slotted, or which kinds of elements are slotted in which slots.
-
-  ```clojure
-  (zc/reg-components
-    :my.example/foo
-    {:props {:slotted (zu/slotted-elements-prop)}
-     :view (fn [{:keys [slotted]}]
-             [:div
-              (if (seq slotted)
-                "Something's slotted"
-                "Nothing's slotted")
-              [:slot]])})
-  ```
-
 ## `zero.extras.db`
 Many modern UI frameworks are built around the concept of a single centralized in-memory DB on the front-end
 housing all FE business state.  This makes it trivial to display the same data in multiple places and formats
@@ -139,7 +52,7 @@ requirements include:
 - [datascript](https://github.com/tonsky/datascript)
 - [relic](https://github.com/wotbrew/relic)
 
-That said, this DB will probably work just fine for most basic projects.  The module exposes the following
+That said, this DB will probably work just fine for many basic projects.  The module exposes the following
 functions and registrations for interacting with the main DB.
 
 - `(get path)`
@@ -162,15 +75,15 @@ functions and registrations for interacting with the main DB.
   - `:fn`, `:args` - Apply `op-payload` (should be a function) to the current path value and any extra args given 
      in `:args`.
 
-- `(<< :ze.db/path path)`
+- `(<< ::db/path path)`
 
   Injects the value at `path` in the DB.
 
-- `(bnd :ze.db/path path)`
+- `(bnd ::db/path path)`
 
   Tracks the current value at `path` in the DB.
 
-- `(act [:ze.db/patch patch])`
+- `(act [::db/patch patch])`
 
   Applies `patch` to the DB.  Equivalent to `(patch! patch)`.
 
@@ -178,7 +91,6 @@ In addition, the `(apply-patch m patch)` function, which implements the DB's pat
 any map, is exposed to allow for implementing other DBs with the same patch notation.  This function returns
 `[patched-m affected-paths]`.
 
-
 ## More to come
-More utilities will likely be added to Zero extras in the future.  Open an issue if you'd like to make
-a request.
+More utilities will likely be added to Zero extras in the future.
+Open an issue if you'd like to make a request.
