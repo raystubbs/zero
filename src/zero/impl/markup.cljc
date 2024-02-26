@@ -53,7 +53,7 @@ tag.
   (extract-tag-props
     [:div#my-thing.foo.bar {:zero.core/class "something"} (list "body")]))
 
-
+;; TODO: remove this eventually
 (defn move-binds "
 Putting watchable things to be bound to props in place of the
 prop values is now deprecated.  Binds should now be put
