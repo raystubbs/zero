@@ -179,7 +179,10 @@
       (.addEventListener dom (name event-name)
         (if once? #(do (.abort aborter) (listener-fn %)) listener-fn)
         #js{:once once? :capture capture? :passive passive? :signal (.-signal aborter)}))
-    (swap! !listener-aborters assoc k aborter)))
+    (swap! !listener-aborters assoc k aborter)
+    (.addEventListener (.-signal aborter) "abort"
+      (fn []
+        (swap! !listener-aborters dissoc k)))))
 
 (defn unlisten [k]
   (if-let [aborter ^js/AbortController (get @!listener-aborters k)]
