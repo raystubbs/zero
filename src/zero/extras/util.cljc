@@ -4,7 +4,7 @@
    [zero.config :as zc]
    [zero.core :as z]
    [zero.impl.base :refer [try-catch try-deref]]
-   [zero.impl.logger :as log]))
+   [zero.logger :as log]))
 
 ;; deprecated
 (zc/reg-injections

@@ -1,8 +1,7 @@
 (ns zero.extras.cdf
   (:require
-    [clojure.string :as str]
-    [zero.core :as z]
-    [zero.impl.logger :as log])
+   [clojure.string :as str]
+   [zero.core :as z])
   #?(:clj (:import [java.io StringWriter] [java.util ArrayList])
      :cljs (:import [goog.string StringBuffer])))
 

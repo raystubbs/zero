@@ -4,9 +4,8 @@
    [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name flatten-body]]
    [zero.impl.injection :refer [apply-injections]]
    [zero.core :as z]
+   [zero.dom :as-alias dom]
    [zero.config :as zconfig]))
-
-(declare html)
 
 (defn- vnode->html [vnode]
   (cond
@@ -16,14 +15,14 @@
           html-attrs (reduce-kv
                        (fn [agg k v]
                          (cond
-                           (= k :zero.core/class)
+                           (= k ::z/class)
                            (assoc agg (name k)
                              (cond
                                (coll? v) (str/join " " (flatten v))
                                (or (symbol? v) (keyword? v)) (name v)
                                :else (str v)))
 
-                           (= k :zero.core/style)
+                           (= k ::z/style)
                            (do
                              (assert (map? v))
                              (assoc agg (name k)
@@ -63,15 +62,17 @@
           (concat
             (map
               (fn [[k v]]
-                [::z/listen {:sel (str "#" (get html-attrs "id"))
-                             :evt k
-                             :act v}])
+                [::dom/listen
+                 {:sel (str "#" (get html-attrs "id"))
+                  :evt k
+                  :act v}])
               (::z/on props))
             (map
               (fn [[k v]]
-                [::z/bind {:sel (str "#" (get html-attrs "id"))
-                           :prop k
-                           :ref v}])
+                [::dom/bind
+                 {:sel (str "#" (get html-attrs "id"))
+                  :prop k
+                  :ref v}])
               (::z/bind props)))
           (map vnode->html)
           str/join)))

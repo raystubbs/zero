@@ -1,21 +1,20 @@
-(ns zero.impl.components
+(ns zero.component
   (:require
-    [clojure.set :as set]
-    [zero.impl.base :as base]
-    [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
-    [zero.impl.injection :refer [apply-injections]]
-    [zero.config :as config]
-    [clojure.string :as str]
-    [goog.object :as gobj]
-    [goog :refer [DEBUG]]))
+   [clojure.set :as set]
+   [zero.impl.base :as base]
+   [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
+   [zero.impl.injection :refer [apply-injections]]
+   [zero.impl.dom :as dom]
+   [zero.config :as config]
+   [clojure.string :as str]
+   [goog.object :as gobj]
+   [goog :refer [DEBUG]]))
 
 (defn- css [s]
   (doto (js/CSSStyleSheet.) (.replaceSync s)))
 
-(defonce ^:private PROPS-SYM (js/Symbol "zProps"))
 (defonce ^:private HTML-NS "http://www.w3.org/1999/xhtml")
 (defonce ^:private SVG-NS "http://www.w3.org/2000/svg")
-(defonce ^:private PRIVATE-SYM (js/Symbol "zPrivate"))
 (defonce ^:private HOST-CSS-SYM (js/Symbol "zHostCss"))
 (def ^:private DEFAULT-CSS (css ":host { display: contents; }"))
 (def ^:private JS-UNDEFINED (js* "undefined"))
@@ -24,71 +23,6 @@
   (case tag
     :svg SVG-NS
     nil))
-
-(defonce !class->fields-index (atom {}))
-
-(defn- prop-writable? [^js obj prop]
-  (if (nil? obj)
-    false
-    (if-let [prop-def (js/Object.getOwnPropertyDescriptor obj prop)]
-      (or (.-writable prop-def) (some? (.-set prop-def)))
-      (prop-writable? (js/Object.getPrototypeOf obj) prop))))
-
-(defn- class->fields-index [^js class]
-  (let [parent-class (js/Object.getPrototypeOf class)
-        proto (.-prototype class)]
-    (when proto
-      (or
-        (get @!class->fields-index class)
-        (let [index (->> proto
-                         js/Object.getOwnPropertyNames
-                         (filter #(prop-writable? proto %))
-                         (mapcat
-                           (fn [prop-name]
-                             [[(keyword prop-name) prop-name]
-                              [(keyword (base/snake-case prop-name)) prop-name]
-                              [(keyword (base/cammel-case prop-name)) prop-name]]))
-                         (into {})
-                         (merge (some-> parent-class class->fields-index)))]
-          (swap! !class->fields-index assoc class index)
-          index)))))
-
-(defonce ^:private internals-fields-index (class->fields-index js/ElementInternals))
-
-(defonce ^:private !css-links (atom #{}))
-(defonce ^:private !css-stylesheet-objects (atom {}))
-(defonce ^:private !css-href-overrides (atom {}))
-
-(defn- load-stylesheet [stylesheet-object url]
-  (gobj/set stylesheet-object PRIVATE-SYM {:href (.toString url)})
-  (-> (js/fetch url)
-    (.then #(.text %))
-    (.then (fn [css-text]
-             (let [{:keys [href]} (gobj/get stylesheet-object PRIVATE-SYM)]
-               (when (= href (.toString url))
-                 (.replace stylesheet-object css-text)))))))
-
-(defn- ->stylesheet-object [x]
-  (cond
-    (instance? js/CSSStyleSheet x)
-    x
-
-    (or (string? x) (instance? js/URL x))
-    (let [absolute-url (js/URL. x js/location.href)
-          absolute-url-str (.toString absolute-url)]
-      (or
-        (get @!css-stylesheet-objects absolute-url-str)
-
-        (let [actual-url-str (if (= js/location.origin (.-origin absolute-url))
-                               (get @!css-href-overrides (.-pathname absolute-url) absolute-url-str)
-                               absolute-url-str)
-              new-css-obj (js/CSSStyleSheet.)]
-          (load-stylesheet new-css-obj actual-url-str)
-          (swap! !css-stylesheet-objects assoc absolute-url-str new-css-obj)
-          new-css-obj)))
-
-    :else
-    (throw (ex-info "Can't convert given object to CSSStyleSheet" {:given x}))))
 
 (defn- diff-shallow [map-a map-b ks]
   (reduce
@@ -125,72 +59,10 @@
       (gobj/set obj field-name true))
     obj))
 
-(defn set-prop [fields-index dom prop-name prop-value]
-  (let [adjusted-value (if (and DEBUG (= (.-nodeName dom) "LINK") (= prop-name :href))
-                         (get @!css-href-overrides prop-value prop-value)
-                         prop-value)]
-    (if-let [field-name (get fields-index prop-name)]
-      (gobj/set dom field-name adjusted-value)
-      (let [attr-name (name prop-name)
-            component-name (or ^Keyword (.-componentName dom) (-> dom .-nodeName str/lower-case keyword))
-            attr-value (when (some? adjusted-value) ((config/get-attr-writer component-name) adjusted-value attr-name component-name))]
-        (if (nil? attr-value)
-          (.removeAttribute dom attr-name)
-          (.setAttribute dom (name prop-name) attr-value))))))
-
-(defonce !binds (atom {}))
-(defonce !bound-props (atom #{}))
-
-(defn bind [k ^js/Node dom prop-name watchable]
-  (when (contains? @!binds k)
-    (throw (ex-info "Bind key already exists" {:key k})))
-  (when (contains? @!bound-props [dom prop-name])
-    (throw (ex-info "Property already bound" {:dom dom :prop-name prop-name})))
-
-  (let [fields-index (-> dom .-constructor class->fields-index)]
-    (add-watch watchable [::bind k]
-      (fn [_ _ _ x] (set-prop fields-index dom prop-name x)))
-    (swap! !binds assoc k {:watchable watchable :prop-name prop-name :dom dom})
-    (swap! !bound-props conj [dom prop-name])
-
-    ;; deref must be done _after_ add-watch to ensure that, if `new-val` is
-    ;; a binding, the underlying data stream has been booted up
-    (let [current (when (satisfies? IDeref watchable) @watchable)]
-      (set-prop fields-index dom prop-name current))))
-
-(defn unbind [k]
-  (if-let [{:keys [watchable prop-name ^js/Node dom]} (get @!binds k)]
-    (do
-      (remove-watch watchable [::bind k])
-      (swap! !binds dissoc k)
-      (swap! !bound-props disj [dom prop-name]))
-    (throw (ex-info "Bind key doesn't exist" {:key k}))))
-
-(defonce !listener-aborters (atom {}))
-
-(defn listen [k ^js/Node dom-or-doms event-name listener-fn & {:keys [once? capture? passive? signal]}]
-  (when (contains? @!listener-aborters k)
-    (throw (ex-info "Listener key already exists" {:key k})))
-  (let [aborter (js/AbortController.)]
-    (when (some? signal)
-      (.addEventListener signal "abort" (fn [_] (.abort aborter))
-        #js{:once true :signal (.-signal aborter)}))
-    (doseq [dom (cond-> dom-or-doms (not (or (coll? dom-or-doms) (instance? js/NodeList dom-or-doms))) vector)]
-      (.addEventListener dom (name event-name)
-        (if once? #(do (.abort aborter) (listener-fn %)) listener-fn)
-        #js{:once once? :capture capture? :passive passive? :signal (.-signal aborter)}))
-    (swap! !listener-aborters assoc k aborter)
-    (.addEventListener (.-signal aborter) "abort"
-      (fn []
-        (swap! !listener-aborters dissoc k)))))
-
-(defn unlisten [k]
-  (if-let [aborter ^js/AbortController (get @!listener-aborters k)]
-    (.abort aborter)
-    (throw (ex-info "Listener key doesn't exist" {:key k}))))
+(defonce ^:private internals-fields-index (dom/class->fields-index js/ElementInternals))
 
 (defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals internals ^js class props]
-  (let [old-props (gobj/get dom PROPS-SYM)
+  (let [old-props (gobj/get dom dom/PROPS-SYM)
         diff (diff-props old-props props)
         ^js host-css (or (gobj/get dom HOST-CSS-SYM)
                        (let [x (js/CSSStyleSheet.)]
@@ -205,15 +77,15 @@
               (.removeProperty style-obj (name k))
               (.setProperty style-obj (name k) (clj->css-property new-val))))))
       (when-some [[_ css-prop] (get diff :zero.core/css)]
-        (set! (.-adoptedStyleSheets dom) (->> (conj css-prop host-css) (mapv ->stylesheet-object) to-array)))
-      
+        (set! (.-adoptedStyleSheets dom) (->> (conj css-prop host-css) (mapv dom/->stylesheet-object) to-array)))
+
       ;; patch listeners
       (doseq [[k [old-val new-val]] (diff :zero.core/on)]
         (when (some? old-val)
-          (unlisten [old-val dom k]))
+          (dom/unlisten [old-val dom k]))
         (when (some? new-val)
-          (listen [new-val dom k] dom k new-val)))
-      
+          (dom/listen [new-val dom k] dom k new-val)))
+
       ;; patch internals
       (doseq [[k [_ new-val]] (diff :zero.core/internals)]
         (case k
@@ -243,33 +115,33 @@
             (gobj/set internals field-name new-val)))))
 
       ;; TODO: element internals (i.e aria, etc.)
-      
-    (gobj/set dom PROPS-SYM props)))
+
+    (gobj/set dom dom/PROPS-SYM props)))
 
 (defn- patch-props [^js/Node dom props]
-  (let [diff (diff-props (or (gobj/get dom PROPS-SYM) {}) props)]
+  (let [diff (diff-props (or (gobj/get dom dom/PROPS-SYM) {}) props)]
     (when-not (empty? diff)
-      (let [fields-index (-> dom .-constructor class->fields-index)
+      (let [fields-index (-> dom .-constructor dom/class->fields-index)
             normal-props-diff (remove (comp namespace key) diff)]
-        
+
         ;; normal props
-        (doseq [[k [_old-val new-val]] normal-props-diff] 
-          (set-prop fields-index dom k new-val))
+        (doseq [[k [_old-val new-val]] normal-props-diff]
+          (dom/set-prop fields-index dom k new-val))
 
         ;; patch listeners
         (doseq [[k [old-val new-val]] (diff :zero.core/on)]
           (when (some? old-val)
-            (unlisten [old-val dom k]))
+            (dom/unlisten [old-val dom k]))
           (when (some? new-val)
-            (listen [new-val dom k] dom k new-val)))
+            (dom/listen [new-val dom k] dom k new-val)))
 
         ;; patch binds
         (doseq [[k [old-val new-val]] (diff :zero.core/bind)]
           (when (some? old-val)
-            (unbind [old-val dom k]))
+            (dom/unbind [old-val dom k]))
           (when (some? new-val)
-            (bind [new-val dom k] dom k new-val)))
-        
+            (dom/bind [new-val dom k] dom k new-val)))
+
         ;; patch styles
         (when-let [style-diff (diff :zero.core/style)]
           (let [style-obj (.-style dom)]
@@ -292,17 +164,17 @@
 
             :else
             (set! (.-className dom) (str class))))
-        (gobj/set dom PROPS-SYM props)))))
+        (gobj/set dom dom/PROPS-SYM props)))))
 
-(defn- prepare-dom-to-be-detached [^js/Node dom !instance-state] 
-  (let [props (gobj/get dom PROPS-SYM)]
+(defn- prepare-dom-to-be-detached [^js/Node dom !instance-state]
+  (let [props (gobj/get dom dom/PROPS-SYM)]
     (doseq [[k watchable] (:zero.core/bind props)]
-      (unbind [watchable dom k]))
-    (gobj/set dom PROPS-SYM (dissoc props :zero.core/bind)))
+      (dom/unbind [watchable dom k]))
+    (gobj/set dom dom/PROPS-SYM (dissoc props :zero.core/bind)))
   (doseq [child-dom (-> dom .-childNodes array-seq)]
     (prepare-dom-to-be-detached child-dom !instance-state))
   (when (and DEBUG (= (.-nodeName dom) "LINK"))
-    (swap! !css-links disj dom)))
+    (dom/on-css-link-removed! dom)))
 
 (defn insert-child! [^js/Node dom ^js/Node reference ^js/Node child]
   (cond
@@ -354,13 +226,13 @@
 (defn- patch-children [^js/Node dom !instance-state children]
   (let [source-layout (-> dom .-childNodes array-seq vec)
         !child-doms (atom
-                     (group-by
-                      (fn [child-dom]
-                        (if (-> child-dom .-nodeType (= js/Node.TEXT_NODE))
-                          :text
-                          (let [props (gobj/get child-dom PROPS-SYM)]
-                            [(:zero.core/sel props) (:zero.core/key props)])))
-                      source-layout))
+                      (group-by
+                        (fn [child-dom]
+                          (if (-> child-dom .-nodeType (= js/Node.TEXT_NODE))
+                            :text
+                            (let [props (gobj/get child-dom dom/PROPS-SYM)]
+                              [(:zero.core/sel props) (:zero.core/key props)])))
+                        source-layout))
 
         take-el-dom (fn [tag props]
                       (let [matcher [(:zero.core/sel props) (:zero.core/key props)]
@@ -368,7 +240,7 @@
                         (if match
                           (do
                             (swap! !child-doms update matcher subvec 1)
-                            match) 
+                            match)
                           (js/document.createElementNS
                             (or
                               (:xmlns props)
@@ -376,7 +248,7 @@
                               (.-namespaceURI dom)
                               HTML-NS)
                             (kw->el-name tag)))))
-        
+
         take-text-dom (fn []
                         (if-let [existing (first (get @!child-doms :text))]
                           (do
@@ -390,7 +262,7 @@
                             (vector? vnode)
                             (let [[tag props body] (preproc-vnode vnode)
                                   child-dom (take-el-dom tag props)
-                                  old-props (gobj/get child-dom PROPS-SYM)]
+                                  old-props (gobj/get child-dom dom/PROPS-SYM)]
                               (when (or
                                       config/disable-tags?
                                       (nil? (:zero.core/tag props))
@@ -419,7 +291,7 @@
               :when (and
                       (= (.-nodeName child-dom) "LINK")
                       (contains? #{"stylesheet" "preload"} (.-rel child-dom)))]
-        (swap! !css-links conj child-dom)))
+        (dom/on-css-link-created! child-dom)))
 
     ;; apply layout changes
     (if (nil? index-of-focused-child-in-target)
@@ -435,9 +307,9 @@
 
 (defn- patch-root [^js/ShadowRoot dom ^js/ElementInternals internals !instance-state vnode]
   (let [class (-> dom .-host .-constructor)
-        !static-state (gobj/get class PRIVATE-SYM)
+        !static-state (gobj/get class dom/PRIVATE-SYM)
         default-css (:default-css @!static-state)
-        old-props (gobj/get dom PROPS-SYM)
+        old-props (gobj/get dom dom/PROPS-SYM)
         [props body] (cond
                        (and (vector? vnode) (= (first vnode) :root>))
                        (rest (preproc-vnode vnode))
@@ -492,10 +364,10 @@
     (let [batch @!dirty]
       (reset! !dirty #{})
       (doseq [^js/Node dom batch]
-        (let [!static-state (-> dom .-constructor (gobj/get PRIVATE-SYM))
-              !instance-state (gobj/get dom PRIVATE-SYM)
+        (let [!static-state (-> dom .-constructor (gobj/get dom/PRIVATE-SYM))
+              !instance-state (gobj/get dom dom/PRIVATE-SYM)
               ^js/ShadowDom shadow (:shadow @!instance-state)
-              rendered-props (gobj/get dom PROPS-SYM)
+              rendered-props (gobj/get dom dom/PROPS-SYM)
               vdom (apply-injections ((:view @!static-state) (:props @!instance-state)) {:z.host dom :z.root shadow})]
 
           ;; if it needs to be focusable, but explicit tabIndex wasn't set
@@ -537,7 +409,7 @@
 
 (defn- patch-el-class [class component-name {:keys [props view focus inherit-doc-css? form-associated?]}]
   (let [^js proto (.-prototype class)
-        !static-state (gobj/get class PRIVATE-SYM)
+        !static-state (gobj/get class dom/PRIVATE-SYM)
         props-map (cond
                     (set? props) (->> props (map #(vector % :default)) (into {}))
                     (map? props) props
@@ -551,7 +423,7 @@
                                 [(:attr prop-spec) prop-spec])))
                           (into {}))
         init-props (fn [^js/Node instance]
-                     (let [!instance-state (gobj/get instance PRIVATE-SYM)
+                     (let [!instance-state (gobj/get instance dom/PRIVATE-SYM)
                            attr-reader (config/get-attr-reader component-name)]
                        (doseq [prop-spec normalized-prop-specs
                                :when (not (contains? (:props @!instance-state) (:prop prop-spec)))]
@@ -588,12 +460,12 @@
                               .values es6-iterator-seq
                               (map (fn [^js link-dom] (.getAttribute link-dom "href")))
                               (remove str/blank?)
-                              (mapv ->stylesheet-object))))]
+                              (mapv dom/->stylesheet-object))))]
     (swap! !static-state merge {:view view :focus focus :name component-name :default-css default-css})
-    
+
     ;; If this component's fields have been indexed,
     ;; remove it from the index since its fields may have changed
-    (swap! !class->fields-index dissoc class)
+    (dom/purge-class-index class)
 
     (js/Object.defineProperties
       class
@@ -610,7 +482,7 @@
           #js{:value
               (fn []
                 (let [^js/Node this (js* "this")]
-                  (swap! !static-state update :instances conj this) 
+                  (swap! !static-state update :instances conj this)
                   (init-props this)
                   (request-render this)))
               :configurable true}
@@ -618,7 +490,7 @@
           #js{:value
               (fn []
                 (let [^js/Node this (js* "this")
-                      !instance-state (gobj/get this PRIVATE-SYM)
+                      !instance-state (gobj/get this dom/PRIVATE-SYM)
                       ^js/ShadowRoot shadow (:shadow @!instance-state)]
                   (when (pos? (get-in @!instance-state [:lifecycle-event-listener-counts "disconnect"]))
                     (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false})))
@@ -636,7 +508,7 @@
           #js{:value
               (fn [attr-name _old-val new-val]
                 (let [^js/Node this (js* "this")
-                      !instance-state (gobj/get this PRIVATE-SYM)
+                      !instance-state (gobj/get this dom/PRIVATE-SYM)
                       attr-reader (config/get-attr-reader component-name)]
                   (when-let [prop-spec (get attr->prop-spec attr-name)]
                     (swap! !instance-state assoc-in [:props (:prop prop-spec)]
@@ -662,12 +534,12 @@
         (:field prop-spec)
         #js{:get
             (fn []
-              (-> (js* "this") (gobj/get PRIVATE-SYM) deref :props (get prop-name)))
+              (-> (js* "this") (gobj/get dom/PRIVATE-SYM) deref :props (get prop-name)))
             :set
             (if (:state-factory prop-spec)
               (js* "undefined")
               (fn [x]
-                (let [!instance-state (-> (js* "this") (gobj/get PRIVATE-SYM))]
+                (let [!instance-state (-> (js* "this") (gobj/get dom/PRIVATE-SYM))]
                   (when-not (identical? x (get-in @!instance-state [:props prop-name]))
                     (swap! !instance-state assoc-in [:props prop-name] x)
                     (when (:connected @!instance-state)
@@ -687,7 +559,7 @@
                                     this['init']()
                                 }
                             })")]
-        (gobj/set new-class PRIVATE-SYM (atom {:instances #{}}))
+        (gobj/set new-class dom/PRIVATE-SYM (atom {:instances #{}}))
         (js/Object.defineProperty (.-prototype new-class) "init"
           #js{:value
               (fn []
@@ -700,7 +572,7 @@
                                          :props {}
                                          :lifecycle-event-listener-counts {}
                                          :doms-on-focus-path #{}})]
-                  (gobj/set this PRIVATE-SYM !instance-state)
+                  (gobj/set this dom/PRIVATE-SYM !instance-state)
                   (.addEventListener shadow "focusin"
                     (fn [^js event]
                       (let [event-path (.composedPath event)
@@ -741,54 +613,14 @@
         (js/customElements.define el-name new-class))))
   nil)
 
-(defn update-components! [{old-components :components} {new-components :components}]
+(defn update-components [{old-components :components} {new-components :components}]
   (when-not (identical? old-components new-components)
     (doseq [[component-name component-spec :as new-component-entry] new-components
             :when (not= new-component-entry (find old-components component-name))]
       (update-component component-name component-spec))))
 
-(add-watch config/!registry ::update-components #(update-components! %3 %4))
-(update-components! {} @config/!registry)
+(add-watch config/!registry ::update-components #(update-components %3 %4))
+(update-components {} @config/!registry)
 
-(defonce ^:private
-  _only-do-this-once
-  (when DEBUG
-    (letfn
-      [(update-link [^js/Node link-dom url]
-         (let [^js/Node clone (.cloneNode link-dom)]
-           (set! (.-href clone) url)
-           (gobj/set clone PROPS-SYM (gobj/get link-dom PROPS-SYM))
-           (.insertAdjacentElement link-dom "beforebegin" clone)
-           (.addEventListener clone "load"
-             (fn [_]
-               (.remove link-dom))
-             #js{:once true})
-           (swap! !css-links disj link-dom)
-           (swap! !css-links conj clone)))
-       (observer-cb [^js/Array records]
-         (let [path->links (delay
-                             (group-by
-                               (fn [^js/Node x]
-                                 (-> x .-href (js/URL. js/location.href) .-pathname))
-                               @!css-links))]
-           (doseq [^js record records, ^js/Node node (-> record .-addedNodes array-seq)
-                   :when (and (= "LINK" (.-nodeName node)) (contains? #{"stylesheet" "preload"} (.-rel node)))
-                   :let [created-link-url (js/URL. (.-href node) js/location.href)
-                         href (.getAttribute node "href")]
-                   :when (= js/location.origin (.-origin created-link-url))]
-             (doseq [^js/Node matching-link (get @path->links (.-pathname created-link-url))]
-               (swap! !css-href-overrides assoc (-> matching-link (gobj/get PROPS-SYM) :href) href)
-               (update-link matching-link href))
-             (doseq [[original-url-str stylesheet-object] @!css-stylesheet-objects
-                     :let [original-url (js/URL. original-url-str)]
-                     :when (and
-                             (= js/location.origin (.-origin original-url))
-                             (= (.-pathname original-url) (.-pathname created-link-url)))]
-               (load-stylesheet stylesheet-object href)))))]
-      (let [observer (js/MutationObserver. observer-cb)
-            opts #js{:childList true}]
-        (js/addEventListener "load"
-          (fn [_]
-            (.observe observer js/document.head opts)
-            (.observe observer js/document.body opts))
-          #js{:once true})))))
+(defonce ^:private _only-do-this-once
+  (when DEBUG (dom/enable-live-reload)))

@@ -3,7 +3,7 @@
    [zero.config :as config]
    [zero.impl.injection :refer [apply-injections]]
    [zero.impl.base :refer [try-catch]]
-   [zero.impl.logger :as log]))
+   [zero.logger :as log]))
 
 (defonce !stream-states (atom {}))
 

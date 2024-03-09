@@ -1,7 +1,7 @@
 (ns zero.impl.injection
   (:require
    [clojure.walk :refer [postwalk]]
-   [zero.impl.logger :as log]
+   [zero.logger :as log]
    [zero.impl.base :refer [try-catch]]
    [zero.config :as config]))
 
