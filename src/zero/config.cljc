@@ -12,7 +12,11 @@
      (goog-define disable-tags? false)
 
      (defmulti harvest-event
-       (fn [^js/Event event] (keyword (.-type event))))
+       (fn [^js/Event event]
+         (let [class (.-constructor event)]
+           (if (= class js/CustomEvent)
+             (keyword (.-type event))
+             class))))
 
      (defmethod harvest-event :default [^js/Event event]
        (case (.-type event)
