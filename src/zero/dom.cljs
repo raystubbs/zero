@@ -54,20 +54,24 @@
   ::listen
   {:props #{:sel :evt :act}
    :view (fn [{:keys [sel evt] action :act :as props}]
-           [:root>
-            ::z/style {:display "none"}
-            ::z/on {:connect (act
-                               [::listen
-                                (<<ctx ::z/host)
-                                (<< ::select-doms sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
-                                evt action])
-                    :update (act
-                              [::unlisten (<<ctx ::z/host)]
-                              [::listen
-                               (<<ctx ::z/host)
-                               (<< ::select-doms sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
-                               evt action])
-                    :disconnect (act [::unlisten (<<ctx ::z/host)])}])}
+           (let [action (cond
+                          (string? action) (js/Function. "event" action)
+                          (fn? action) action
+                          :else (throw (ex-info "'act' is not a function" {:act action})))]
+             [:root>
+              ::z/style {:display "none"}
+              ::z/on {:connect (act
+                                 [::listen
+                                  (<<ctx ::z/host)
+                                  (<< ::select-doms sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
+                                  evt action])
+                      :update (act
+                                [::unlisten (<<ctx ::z/host)]
+                                [::listen
+                                 (<<ctx ::z/host)
+                                 (<< ::select-doms sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
+                                 evt action])
+                      :disconnect (act [::unlisten (<<ctx ::z/host)])}]))}
 
   ::bind
   {:props #{:sel :prop :ref}
