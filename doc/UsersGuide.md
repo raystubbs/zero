@@ -52,7 +52,7 @@ Or it can be rendered via Zero’s markup syntax, or via the native element rend
 Zero config works via a registry system in `zero.config`.
 Registering something in Zero doesn’t actually do anything except
 add a record to this registry.  In order for a registration to actually
-be ‘realized’, the subsystem handles registrations of that type has to
+be ‘realized’, the subsystem that handles registrations of that type has to
 be enabled/loaded.  To enable components in your project, the `zero.component`
 namespace must be loaded.
     
