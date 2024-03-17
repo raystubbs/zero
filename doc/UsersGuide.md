@@ -49,14 +49,23 @@ Or it can be rendered via Zero’s markup syntax, or via the native element rend
 ```
 
 > **Warning**
-Zero config works via a registry system in `zero.config`.Registering something in Zero doesn’t actually do anything exceptadda record to this registry.  In order for a registration toactuallybe ‘realized’, the subsystem that actually makes use oftheregistration has to be loaded/enabled.  To enable componentsin yourproject the `zero.component` namespace must be loaded.
+Zero config works via a registry system in `zero.config`.
+Registering something in Zero doesn’t actually do anything except
+add a record to this registry.  In order for a registration to actually
+be ‘realized’, the subsystem that makes use of the registration has to be
+loaded/enabled.  To enable components in your project the `zero.component`
+namespace must be loaded.
     
 
 ## 2 State Management
 In addition to Zero’s main goal of providing a convenient interface to build web components, the library also provides a few primitives for overall state management.  These utilities are flexible enough to be useful regardless of your project type: static site, SSR, SPA, etc.  However, they aren’t essential, and you can instead opt to prefer the browser’s native state management mechanisms (i.e. raw event listeners and manual property updates).
 
-> **TIP**
-Zero’s state management types (`Action`, `Binding`, `Injection`) all have value semantics.  They’re immutable and structurally comparable.  Conveniently, this also means they can be serialized and transferred over a network, or embedded in HTML (or other formats).  This makes them powerful tools for page rendering.  But also, perhaps, a flexible mechanism for expressing actions as values within an API.
+> **Tip**
+Zero’s state management types (`Action`, `Binding`, `Injection`) all have
+value semantics.  They’re immutable and structurally comparable.  Conveniently,
+this also means they can be serialized and transferred over a network, or embedded
+in HTML (or other formats).  This makes them powerful tools for page rendering.
+But also, perhaps, a flexible mechanism for expressing actions as values within an API.
     
 
 ### 2.1 Injections
