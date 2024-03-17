@@ -28,27 +28,10 @@ it depends on:
 + [ElementInternals](https://caniuse.com/mdn-api_elementinternals)
 
 ## Learning
-Zero is in a highly experimental stage of development, as such, it's
-difficult to keep any sort of extensive documentation up to date.  So
-I've built a few demos, and will try to keep those up to date with
-the latest Zero version.
+Check out the [Zero User's Guide](doc/UsersGuide.md) for a (reasonably)
+complete guide.  Also, there are a few demos:
 - [TodoMVC](https://github.com/raystubbs/zero-todomvc)
 - [SSR Demo (w. live updates)](https://github.com/raystubbs/zero-ssr-demo)
 
-In addition, I'll do my best to keep the following up to date:
-- [Configuration](doc/Configuration.md) - Full walkthrough of `zero.config`,
-  which is used to configure all aspect of Zero, including registering
-  components.
-- [Markup](doc/Markup.md) - Detailed description of the markup
-  notation used by Zero, which is akin to Hiccup, but not identical.
-- [Extras](doc/Extras.md) - Goes through Zero's 'extra' modules,
-  including derived streams and the built-in database implementation.
-
-## Contact
-- [zero@raystubbs.me](mailto:zero@raystubbs.me)
-- Clojurians: [@Ray Stubbs](https://clojurians.slack.com/team/U062WV76S1W)
-
-[wc]: https://developer.mozilla.org/en-US/docs/Web/API/Web_components
-[hiccup]: https://github.com/weavejester/hiccup
-[markup-doc]: doc/Markup.md
-[delegates-focus]: https://developer.mozilla.org/en-US/docs/Web/API/ShadowRoot/delegatesFocus
+Feel free to DM me [@Ray Stubbs](https://clojurians.slack.com/team/U062WV76S1W) in
+the Clojurians Slack for any questions.
