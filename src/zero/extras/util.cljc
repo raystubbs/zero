@@ -6,40 +6,6 @@
    [zero.impl.base :refer [try-catch try-deref]]
    [zero.logger :as log]))
 
-;; deprecated
-(zc/reg-injections
-  ::ctx
-  (fn [context & path]
-    (get-in context path))
-
-  ::act
-  (fn [_ & args]
-    (apply z/act args))
-
-  ::<<
-  (fn [_ & args]
-    (apply z/<< args)))
-
-;; deprecated
-(zc/reg-effects
-  ::cond
-  (fn [& cases]
-    (when-let [[_ & effects] (first (filter first cases))]
-      ((apply z/act effects) nil)))
-
-  ::effects
-  (fn [effects]
-    ((apply z/act effects) nil)))
-
-(defn ^:deprecated <<act [& args]
-  (apply z/<< ::act args))
-
-(defn ^:deprecated <<ctx [& path]
-  (apply z/<< ::ctx path))
-
-(defn ^:deprecated <<< [& args]
-  (apply z/<< ::<< args))
-
 (defn derived [f & deps]
   (fn [rx & args]
     (let [watch-id (random-uuid)
@@ -88,5 +54,3 @@
     (add-watch !dep-vals [::watch key]
       (fn [_ _ _ new-val]
         (on-deps new-val)))))
-
-(def ^:deprecated css-selector z/css-selector)

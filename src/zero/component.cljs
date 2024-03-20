@@ -1,14 +1,15 @@
 (ns zero.component
   (:require
-   [clojure.set :as set]
-   [zero.impl.base :as base]
-   [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
-   [zero.impl.injection :refer [apply-injections]]
-   [zero.impl.dom :as dom]
-   [zero.config :as config]
-   [clojure.string :as str]
-   [goog.object :as gobj]
-   [goog :refer [DEBUG]]))
+    [clojure.set :as set]
+    [zero.impl.base :as base]
+    [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
+    [zero.impl.injection :refer [apply-injections]]
+    [zero.impl.dom :as dom]
+    [zero.config :as config]
+    [clojure.string :as str]
+    [goog.object :as gobj]
+    [goog :refer [DEBUG]]
+    [zero.logger :as log]))
 
 (defn- css [s]
   (doto (js/CSSStyleSheet.) (.replaceSync s)))
@@ -368,7 +369,12 @@
               !instance-state (gobj/get dom dom/PRIVATE-SYM)
               ^js/ShadowDom shadow (:shadow @!instance-state)
               rendered-props (gobj/get dom dom/PROPS-SYM)
-              vdom (apply-injections ((:view @!static-state) (:props @!instance-state)) {:z.host dom :z.root shadow})]
+              vdom (try
+                     ((:view @!static-state) (:props @!instance-state))
+                     (catch :default e
+                       (log/error :msg "Error in component :view" :component (:name @!static-state) :error e)
+                       nil))
+              vdom (apply-injections vdom {:z.host dom :z.root shadow})]
 
           ;; if it needs to be focusable, but explicit tabIndex wasn't set
           (when (and

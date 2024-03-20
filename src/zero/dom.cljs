@@ -4,7 +4,8 @@
    [zero.impl.base :refer [IDisposable dispose!]]
    [zero.config :as config]
    [zero.core :refer [<< <<ctx act]:as z]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [goog.object :as gobj]))
 
 (defn bind [k ^js/Node dom prop-name watchable]
   (dom/bind k dom prop-name watchable))
@@ -18,11 +19,19 @@
 (defn unlisten [k]
   (dom/unlisten k))
 
+(defonce ^:private INTERNAL-STATE-SYM (js/Symbol "zInternalState"))
+
+(defn set-internal-state [^js/Node dom new-state]
+  (if-let [!state (gobj/get dom INTERNAL-STATE-SYM)]
+    (reset! !state new-state)
+    (throw (ex-info "No internal state available on given DOM node" {:dom dom}))))
+
 (config/reg-effects
   ::listen listen
   ::unlisten unlisten
   ::bind bind
-  ::unbind unbind)
+  ::unbind unbind
+  ::set-internal-state set-internal-state)
 
 (config/reg-injections
   ::select-doms
@@ -130,3 +139,10 @@
      :state-cleanup
      (fn slotted-prop-state-cleanup [state _]
        (dispose! state))}))
+
+(defn internal-state-prop [initial]
+  {:state-factory
+   (fn [^js/Node dom]
+     (let [!state (atom initial)]
+       (gobj/set dom INTERNAL-STATE-SYM !state)
+       !state))})

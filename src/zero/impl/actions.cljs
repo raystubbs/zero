@@ -4,7 +4,8 @@
     [zero.impl.injection :refer [apply-injections]]
     [goog.object :as gobj]
     [goog :refer [DEBUG]]
-    [zero.config :as config]))
+    [zero.config :as config]
+    [zero.logger :as log]))
 
 (defonce Action (js* "
 (class extends Function {
@@ -29,17 +30,18 @@
       (.preventDefault ev))
     (when (:stop-propagation? props)
       (.stopPropagation ev))
-    (let [^js root (.getRootNode (.-currentTarget ev))
-          ^js host (when (instance? js/ShadowRoot root) (.-host root))
-          data (config/harvest-event ev)]
-      (apply act
-        {:zero.core/event.data data
-         :zero.core/event.target (.-target ev)
-         :zero.core/event.current (.-currentTarget ev)
-         :zero.core/event ev
-         :zero.core/host host
-         :zero.core/root root}
-        nil))))
+    (when (or (not (:ignore-bubbled? props)) (identical? (.-target ev) (.-currentTarget ev)))
+      (let [^js root (.getRootNode (.-currentTarget ev))
+            ^js host (when (instance? js/ShadowRoot root) (.-host root))
+            data (config/harvest-event ev)]
+        (apply act
+          {:zero.core/event.data data
+           :zero.core/event.target (.-target ev)
+           :zero.core/event.current (.-currentTarget ev)
+           :zero.core/event ev
+           :zero.core/host host
+           :zero.core/root root}
+          nil)))))
 
 (defonce ^:private THROTTLE-STATE (js/Symbol "zThrottleState"))
 
