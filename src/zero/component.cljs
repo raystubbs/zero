@@ -222,7 +222,7 @@
           :else
           (do
             (insert-child! dom boundary-dom next-child-dom)
-            (recur boundary-index (inc next-target-index))))))))
+            (recur next-target-index (inc next-target-index))))))))
 
 (defn- patch-children [^js/Node dom !instance-state children]
   (let [source-layout (-> dom .-childNodes array-seq vec)
@@ -257,29 +257,37 @@
                             existing)
                           (js/document.createTextNode "")))
 
-        target-layout (mapv
-                        (fn process-children [vnode]
-                          (cond
-                            (vector? vnode)
-                            (let [[tag props body] (preproc-vnode vnode)
-                                  child-dom (take-el-dom tag props)
-                                  old-props (gobj/get child-dom dom/PROPS-SYM)]
-                              (when (or
-                                      config/disable-tags?
-                                      (nil? (:zero.core/tag props))
-                                      (not= (:zero.core/tag props) (:zero.core/tag old-props)))
-                                (patch-props child-dom props)
-                                (when-not (:zero.core/opaque? props)
-                                  (patch-children child-dom !instance-state body)))
-                              child-dom)
+        target-layout (->> children
+                        (mapcat
+                          (fn process-children [vnode]
+                            (cond
+                              (vector? vnode)
+                              (let [[tag props body] (preproc-vnode vnode)
+                                    child-dom (take-el-dom tag props)
+                                    old-props (gobj/get child-dom dom/PROPS-SYM)]
+                                (when (or
+                                        config/disable-tags?
+                                        (nil? (:zero.core/tag props))
+                                        (not= (:zero.core/tag props) (:zero.core/tag old-props)))
+                                  (patch-props child-dom props)
+                                  (when-not (:zero.core/opaque? props)
+                                    (patch-children child-dom !instance-state body)))
+                                [child-dom])
 
-                            :else
-                            (let [child-dom (take-text-dom)
-                                  text-value (str vnode)]
-                              (when-not (identical? (.-nodeValue child-dom) text-value)
-                                (set! (.-nodeValue child-dom) text-value))
-                              child-dom)))
-                        children)
+                              (fn? vnode)
+                              (let [vdom (vnode (:props @!instance-state))]
+                                (if (seq? vdom)
+                                  (map process-children vdom)
+                                  (process-children vdom)))
+
+
+                              :else
+                              (let [child-dom (take-text-dom)
+                                    text-value (str vnode)]
+                                (when-not (identical? (.-nodeValue child-dom) text-value)
+                                  (set! (.-nodeValue child-dom) text-value))
+                                [child-dom]))))
+                        vec)
 
         focused-doms (:doms-on-focus-path @!instance-state)
         index-of-focused-child-in-target (when (seq focused-doms) (base/index-of (partial contains? focused-doms) target-layout))

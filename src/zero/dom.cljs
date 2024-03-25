@@ -57,6 +57,7 @@
 (config/reg-components
   ::echo
   {:props #{:vdom}
+   :inherit-doc-css? true
    :view (fn [{:keys [vdom]}]
            vdom)}
   

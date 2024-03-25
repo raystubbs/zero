@@ -210,23 +210,12 @@ for a component with this name.
   (apply << ::<< args))
 
 (config/reg-effects
-  ::cond
-  (fn [& clauses]
-    (let [paired-clauses (partition-all 2 clauses)]
-      (loop [remaining paired-clauses]
-        (if (empty? remaining)
-          nil
-          (let [[test action :as clause] (first remaining)]
-            (when (not= 2 (count clause))
-              (throw (ex-info "Uneven number of items in :zero.core/cond" {:items clauses})))
-            (if test
-              (action {})
-              (recur (rest remaining))))))))
-
-  ::case
-  (fn [v & {:as cases}]
-    (when-let [action (get cases v (get cases :default))]
-      (action {}))))
+  ::choose
+  (fn [f & args]
+    (doseq [[effect-key & effect-args] (apply f args)]
+      (if-let [effect-handler (get-in @config/!registry [:effect-handlers effect-key])]
+        (apply effect-handler effect-args)
+        (throw (ex-info "No effect handler registered for key" {:key effect-key}))))))
 
 (config/reg-injections
   ::ctx

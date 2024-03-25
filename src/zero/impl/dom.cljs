@@ -68,6 +68,7 @@
                                (get @!css-href-overrides (.-pathname absolute-url) absolute-url-str)
                                absolute-url-str)
               new-css-obj (js/CSSStyleSheet.)]
+          (.replaceSync new-css-obj "* { display: none; }")
           (load-stylesheet new-css-obj actual-url-str)
           (swap! !css-stylesheet-objects assoc absolute-url-str new-css-obj)
           new-css-obj)))
