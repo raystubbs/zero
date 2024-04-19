@@ -382,7 +382,7 @@
                      (catch :default e
                        (log/error :msg "Error in component :view" :component (:name @!static-state) :error e)
                        nil))
-              vdom (apply-injections vdom {:z.host dom :z.root shadow})]
+              vdom (apply-injections vdom {:zero.core/host dom :zero.core/root shadow})]
 
           ;; if it needs to be focusable, but explicit tabIndex wasn't set
           (when (and
