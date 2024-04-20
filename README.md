@@ -2,7 +2,16 @@
 [![Clojars Project](https://img.shields.io/clojars/v/me.raystubbs/zero.svg)](https://clojars.org/me.raystubbs/zero)
 
 # Zero
-A toolkit for building web components in ClojureScript.
+A toolkit for building web components in Clojure and ClojureScript.
+
+## What Can I Build with Zero?
+*Simple extensions to the browser.* Extend the browser as a hypermedia client. Do you wish the `form` element would update part of the DOM rather than reload the whole page? Build a custom component that does just that. 
+
+*Design Systems*. Web components are [great for design systems](https://shoelace.style). Build a design system in Clojure(Script), and share it with other teams regardless of the stack they use.
+
+*Micro-frontends*. Web components are [ideal for micro-frontends](https://micro-frontends.org/). Your team can use Zero alongside other teams using React or Svelte - in the same application.
+
+*State-heavy SPAs*. Zero provides a set of state management tools from the simple and easy to the simple and sophisticated. Start easy and scale up as you need to.
 
 ## Highlights
 - Depends only on ClojureScript core
