@@ -14,7 +14,9 @@
       (doseq [[[binding key] f] watches]
         (try-catch
           (f key binding old-val new-val)
-          (log/error :msg "Error in stream watcher" :stream stream-ident :exception %))))))
+          (log/error "Error in stream watcher"
+            :data {:stream stream-ident}
+            :ex %))))))
 
 (defprotocol IBinding
   (^:private -bnd-deref [b])
@@ -79,7 +81,10 @@
               (swap! !stream-states assoc-in [stream-ident :kill-fn] kill-fn)
               nil)
             (do
-              (log/error :msg "Error booting stream" :stream (.-stream-key b) :args (.-args b) :exception %)
+              (log/error "Error booting stream"
+                :data {:stream (.-stream-key b)
+                       :args (.-args b)}
+                :ex %)
               (swap! !stream-states dissoc stream-ident)))))))
   (-bnd-remove-watch [^Binding b key]
     (let [stream-ident [(.-stream-key b) (.-args b)]
@@ -93,7 +98,10 @@
         (when-let [kill-fn (get-in old [stream-ident :kill-fn])]
           (try-catch
             (kill-fn)
-            (log/error :msg "Error in stream cleanup fn" :stream (nth stream-ident 0) :args (nth stream-ident 1) :exception %))))))
+            (log/error "Error in stream cleanup fn"
+              :data {:stream (nth stream-ident 0)
+                     :args (nth stream-ident 1)}
+              :ex %))))))
   (-bnd-equiv [^Binding b ^Binding other]
     (and
       (instance? Binding other)
@@ -118,11 +126,15 @@
       (when (fn? kill-fn)
         (try-catch
           (kill-fn)
-          (log/error :msg "Error in stream cleanup fn" :stream stream-key :args args :exception %)))
+          (log/error "Error in stream cleanup fn"
+            :data {:stream stream-key :args args}
+            :ex %)))
       (try-catch
         (swap! !stream-states assoc-in [stream-ident :kill-fn]
           (apply stream-handler (rx-fn stream-ident) (apply-injections args {}))) 
-        (log/error :msg "Error in stream boot fn, hot swap failed" :stream stream-key :args args :exception %)))))
+        (log/error "Error in stream boot fn, hot swap failed"
+          :data {:stream stream-key :args args}
+          :ex %)))))
 (add-watch config/!registry ::update-streams #(update-streams! %3 %4))
 (update-streams! {} @config/!registry)
 

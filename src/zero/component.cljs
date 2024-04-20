@@ -380,7 +380,9 @@
               vdom (try
                      ((:view @!static-state) (:props @!instance-state))
                      (catch :default e
-                       (log/error :msg "Error in component :view" :component (:name @!static-state) :error e)
+                       (log/error "Error in component :view function"
+                         :data {:component (:name @!static-state)}
+                         :ex e)
                        nil))
               vdom (apply-injections vdom {:zero.core/host dom :zero.core/root shadow})]
 
@@ -398,8 +400,10 @@
               (:internals @!instance-state)
               !instance-state
               vdom)
-            (catch :default e
-              (js/console.error "Error rendering component" (:name @!static-state) e)))
+            (catch :default ex
+              (log/error "Error rendering component"
+                :data {:component (:name @!static-state)}
+                :ex ex)))
 
           ;; dispatch lifecycle events
           (let [event-type (if (:connected @!instance-state)

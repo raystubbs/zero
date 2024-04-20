@@ -42,7 +42,9 @@
                 r (apply injector context (postwalk #(if (instance? Injection %) (-inj-injected % context !cache) %) (.-args inj)))]
             (swap! !cache assoc cache-key r)
             r)
-          (log/error :exception % :injection inj)))))
+          (log/error "Error injecting"
+            :data {:injection inj}
+            :ex %)))))
   (-inj-equiv [^Injection inj ^Injection other]
     (and
       (instance? Injection other)

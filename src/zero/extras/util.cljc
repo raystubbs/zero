@@ -13,7 +13,7 @@
           on-deps (fn [dep-vals]
                     (try-catch
                       (rx (apply f dep-vals args)) 
-                      (log/error :exception %)))]
+                      (log/error "Error in derived stream function" :ex %)))]
       (doseq [[idx dep] (map-indexed vector deps)]
         (add-watch dep watch-id
           (fn [_ _ _ new-val]
@@ -45,7 +45,7 @@
         on-deps (fn [dep-vals]
                   (try-catch
                     (apply f dep-vals) 
-                    (log/error :exception %)))]
+                    (log/error "Error in watch function" :ex %)))]
     (doseq [[idx dep] (map-indexed vector deps)]
       (add-watch dep [::watch key]
         (fn [_ _ _ new-val]
