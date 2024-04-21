@@ -29,6 +29,61 @@ A toolkit for building web components in Clojure and ClojureScript.
 - Web components are cool, but the native API for building them isn't very convenient
     - Zero makes web components easy
 
+## Reactive State
+Zero gives you tools for reactive state. You can choose to stick close to the DOM, following HATEOS principles. You can use a central in-memory application database similar to re-frame. Or you can choose from intermediate options -- how you manage state is up to you.
+
+Let's show the different options using the same example: an incrementing button. We want a button that reads "Clicked 0 Times". Every time you click it, it should increment the counter.
+
+You can render this button wherever you choose: in React, Svelte, pure HTML. It looks like this:
+
+```html
+<increment-button count="0"></increment-button>
+```
+
+This can be implemented a few different ways. We will consider several examples, moving from the low level to the high level.
+
+### Manual Event Handling
+Zero can make custom component's HTML attributes reactive. Similar to React's notion that a view is a function of its props, we can implement HATEOS in a reactive way.
+
+
+```clojurescript
+(ns increment-counter
+  (:require [zero.core :as z]
+            [zero.config :as zc]
+            [zero.component]))
+
+(defn- on-click
+  [event]
+  (let [increment-button (-> event (.-currentTarget) (.-host))
+        clicks (some-> (.getAttribute increment-button "clicks")
+                       (js/parseInt)
+                       inc
+                       str)]
+    (.setAttribute increment-button "clicks" clicks)))
+
+(defn button-view
+  [{:keys [clicks]}]
+  [:root> {::z/on {:click on-click}}
+   [:button (str "Clicked " clicks " times")]])
+
+(zc/reg-components
+ :incrementing-button {:view button-view
+                       :props #{:clicks}})
+```
+
+When we register our component, we declare `clicks` as a reactive attribute. When we the `incrementing-button`'s `clicks` attribute is updated, it will re-render.
+
+We use the `zero.core/on` our root component to listen for click events. When the click occurs, `on-click` is called, and it increments the `incrementing-button`'s `clicks` attribute. Zero automatically re-renders the `incrementing-button`.
+
+### Actions
+(This example will be similar to the previous, except it will use actions to eliminate some boilerplate around finding the host.)
+
+### Atom
+(this example uses a Clojurescript atom to store the state)
+
+### App DB
+(re-frame-esque example)
+
 ## Warning
 Depends on modern browser APIs, works on the latest versions of all
 major browsers... but will break in some not-so-old versions.  In particular,
