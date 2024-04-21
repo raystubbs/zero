@@ -43,7 +43,7 @@ You can render this button wherever you choose: in React, Svelte, pure HTML. It 
 This can be implemented a few different ways. We will consider several examples, moving from the low level to the high level.
 
 ### Manual Event Handling
-Zero can make custom component's HTML attributes reactive. Similar to React's notion that a view is a function of its props, we can implement HATEOS in a reactive way.
+Zero can make custom component's HTML attributes reactive. Similar to React's notion that a view is a function of its props, we can render a web component as a function of its attributes.
 
 
 ```clojurescript
