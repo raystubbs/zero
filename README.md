@@ -37,7 +37,7 @@ Let's show the different options using the same example: an incrementing button.
 You can render this button wherever you choose: in React, Svelte, pure HTML. It looks like this:
 
 ```html
-<increment-button count="0"></increment-button>
+<increment-button clicks="0"></increment-button>
 ```
 
 This can be implemented a few different ways. We will consider several examples, moving from the low level to the high level.
