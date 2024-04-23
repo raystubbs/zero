@@ -582,7 +582,8 @@
           #js{:value
               (fn []
                 (let [^js this (js* "this")
-                      ^js shadow (.attachShadow this #js{:mode "open" :delegatesFocus (= focus :delegate)})
+                      ^js shadow (or (.-shadowRoot this)
+                                   (.attachShadow this #js{:mode "open" :delegatesFocus (= focus :delegate)}))
                       !instance-state (atom
                                         {:shadow shadow
                                          :internals (.attachInternals this)

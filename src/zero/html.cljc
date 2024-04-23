@@ -3,9 +3,81 @@
    [clojure.string :as str]
    [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name flatten-body]]
    [zero.impl.injection :refer [apply-injections]]
+   [zero.impl.base :as base]
    [zero.core :as z]
    [zero.dom :as-alias dom]
-   [zero.config :as zconfig]))
+   [zero.config :as zconfig])
+  #?(:clj
+     (:import
+      [java.net URI URL])))
+
+(declare vnode->html)
+
+(defn maybe-shadow-dom [tag markup-props]
+  (when-let [spec (get-in @zconfig/!registry [:components tag])]
+    (let [spec-props (if (set? (:props spec))
+                       (into {} (map (juxt identity (constantly :default)) (:props spec)))
+                       (:props spec))
+          view-props (->> spec-props
+                       (keep
+                         (fn [[k v]]
+                           [k
+                            (cond
+                              (or
+                                (= v :default)
+                                (= v :field)
+                                (and
+                                  (map? v)
+                                  (::use? v)
+                                  (string? (:field v))
+                                  (not (:state v))
+                                  (not (:state-factory v))))
+                              (get markup-props k)
+
+                              (or
+                                (= v :attr)
+                                (and
+                                  (map? v)
+                                  (::use? v)
+                                  (string? (:attr v))
+                                  (not (:state v))
+                                  (not (:state-factory v))))
+                              (let [writer (zconfig/get-attr-writer tag)
+                                    reader (zconfig/get-attr-reader tag)]
+                                (reader (writer (get markup-props k))))
+
+                              (and (map? v) (::use? v))
+                              (if-let [state (:state v)]
+                                (base/try-deref state)
+                                (throw
+                                  (ex-info "Prop marked as usable for `zero.html`, but isn't"
+                                    {:component tag :prop k}))))]))
+                       vec
+                       (into {}))
+          view-result ((:view spec) view-props)
+          [shadow-root-props shadow-root-body] (cond
+                                                 (and (vector? view-result) (= (first view-result) :root>))
+                                                 (let [[_ props body] (preproc-vnode view-result)]
+                                                   [props body])
+
+                                                 (seq? view-result)
+                                                 [{} view-result]
+
+                                                 :else
+                                                 [{} [view-result]])]
+      (vnode->html
+        (into [:template :shadowrootmode "open"]
+          (concat shadow-root-body
+            (keep
+              (fn [css-val]
+                (when
+                  (or (string? css-val)
+                    #?(:cljs (instance? js/URL css-val)
+                       :clj (or (instance? URI css-val) (instance? URL css-val))))
+                  [:link :rel "stylesheet" :href (str css-val)]))
+              (if (coll? (::z/css shadow-root-props))
+                (::z/css shadow-root-props)
+                [(::z/css shadow-root-props)]))))))))
 
 (defn- vnode->html [vnode]
   (cond
@@ -51,12 +123,13 @@
               (map #(str (key %) "=\"" (str/replace (str (val %)) #"\"" "&quot;") "\""))
               (str/join " "))))
         ">"
+        (maybe-shadow-dom tag props)
         (cond
           (= "script" html-tag)
           (->> body str/join)
           
           :else
-          (->> body (map vnode->html) str/join))
+          (->> body (map vnode->html) str/join)) 
         "</" html-tag ">"
         (->>
           (concat
