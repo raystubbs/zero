@@ -44,6 +44,29 @@
 (defonce ^:private !css-stylesheet-objects (atom {}))
 (defonce ^:private !css-href-overrides (atom {}))
 
+(defn- ensure-top-level-css-link! [css-url]
+  (when DEBUG
+    (let [full-css-url (js/URL. (str css-url) js/location.origin)]
+      (when (= js/location.origin (.-origin full-css-url))
+        (let [top-level-css-link-doms (js/document.querySelector "link[rel=\"stylesheet\"]")
+              existing-link-dom (some
+                                  (fn [^js/HTMLLinkElement dom]
+                                    (let [link-url (js/URL. (.-href dom) js/location.origin)]
+                                      (when
+                                        (and
+                                          (= (.-origin full-css-url) (.-origin link-url))
+                                          (= (.-pathname full-css-url) (.-pathname link-url)))
+                                        dom)))
+                                  top-level-css-link-doms)]
+          (or existing-link-dom
+            (let [new-link-dom (js/document.createElement "link")]
+              ;; impossible media query, so link will never apply
+              (set! (.-media new-link-dom) "screen and print")
+              (set! (.-href new-link-dom) (.-pathname full-css-url))
+              (set! (.-rel new-link-dom) "stylesheet")
+              (js/document.head.append new-link-dom)
+              new-link-dom)))))))
+
 (defn- load-stylesheet [stylesheet-object url]
   (gobj/set stylesheet-object PRIVATE-SYM {:href (.toString url)})
   (-> (js/fetch url)
@@ -67,7 +90,8 @@
         (let [actual-url-str (if (= js/location.origin (.-origin absolute-url))
                                (get @!css-href-overrides (.-pathname absolute-url) absolute-url-str)
                                absolute-url-str)
-              new-css-obj (js/CSSStyleSheet.)]
+              new-css-obj (js/CSSStyleSheet.)] 
+          (ensure-top-level-css-link! absolute-url-str)
           (.replaceSync new-css-obj "* { display: none; }")
           (load-stylesheet new-css-obj actual-url-str)
           (swap! !css-stylesheet-objects assoc absolute-url-str new-css-obj)
@@ -121,6 +145,7 @@
 (defonce !listener-aborters (atom {}))
 
 (defn on-css-link-created! [^js/HTMLLinkElement link-dom]
+  (ensure-top-level-css-link! (.-href link-dom))
   (swap! !css-links conj link-dom))
 
 (defn on-css-link-removed! [^js/HTMLLinkElement link-dom]
@@ -167,7 +192,7 @@
                                (-> x .-href (js/URL. js/location.href) .-pathname))
                              @!css-links))]
          (doseq [^js record records, ^js/Node node (-> record .-addedNodes array-seq)
-                 :when (and (= "LINK" (.-nodeName node)) (contains? #{"stylesheet" "preload"} (.-rel node)))
+                 :when (and (= "LINK" (.-nodeName node)) (= "stylesheet" (.-rel node)))
                  :let [created-link-url (js/URL. (.-href node) js/location.href)
                        href (.getAttribute node "href")]
                  :when (= js/location.origin (.-origin created-link-url))]
