@@ -72,12 +72,38 @@ When we register our component, we declare `clicks` as a prop. When we update th
 
 To update our component, we use use the `zero.core/on` prop on the root to listen for click events. When the click occurs, `on-click` is called, and it increments the `incrementing-button`'s `clicks` property. `incrementing-button` re-renders automatically.
 
+### Atom
+
+We can also use ClojureScript's built-in tools for state. Let's look at an example using an atom.
+
+```clojurescript
+(ns increment-counter
+  (:require [zero.core :as z]
+            [zero.config :as zc]
+            [zero.component]))
+
+(defonce clicks*
+  (atom 0))
+
+(defn on-click
+  [_event]
+  (swap! clicks* inc))
+
+(defn button-view
+  [{:keys [clicks]}]
+  [:root> {::z/on {:click on-click}}
+   [:button (str "Clicked " clicks " times")]])
+
+(zc/reg-components
+ :incrementing-button {:view button-view
+                       :props {:clicks clicks*}})
+```
+
+Here we have bound the `clicks` prop to an atom. Similar to reagent, when that atom updates, our `incrementing-button` component re-renders.
 
 ### Actions
 (This example will be similar to the previous, except it will use actions to eliminate some boilerplate around finding the host.)
 
-### Atom
-(this example uses a Clojurescript atom to store the state)
 
 ### App DB
 (re-frame-esque example)
