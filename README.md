@@ -52,14 +52,11 @@ Zero can make custom component's HTML attributes reactive. Similar to React's no
             [zero.config :as zc]
             [zero.component]))
 
-(defn- on-click
+(defn on-click
   [event]
-  (let [increment-button (-> event (.-currentTarget) (.-host))
-        clicks (some-> (.getAttribute increment-button "clicks")
-                       (js/parseInt)
-                       inc
-                       str)]
-    (.setAttribute increment-button "clicks" clicks)))
+  (let [increment-button (.-host (.-currentTarget event))
+        clicks           (js/parseInt (.-clicks increment-button))]
+    (set! (.-clicks increment-button) (inc clicks))))
 
 (defn button-view
   [{:keys [clicks]}]
