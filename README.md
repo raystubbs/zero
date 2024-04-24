@@ -43,7 +43,7 @@ You can render this button wherever you choose: in React, Svelte, pure HTML. It 
 This can be implemented a few different ways. We will consider several examples, moving from the low level to the high level.
 
 ### Manual Event Handling
-Zero can make custom component's HTML attributes reactive. Similar to React's notion that a view is a function of its props, we can render a web component as a function of its attributes.
+Zero makes custom component reactive. Similar to React's notion that a view is a function of its props, we can render a web component as a function of its properties.
 
 
 ```clojurescript
@@ -68,9 +68,10 @@ Zero can make custom component's HTML attributes reactive. Similar to React's no
                        :props #{:clicks}})
 ```
 
-When we register our component, we declare `clicks` as a reactive attribute. When we the `incrementing-button`'s `clicks` attribute is updated, it will re-render.
+When we register our component, we declare `clicks` as a prop. When we update the `incrementing-button`'s `clicks` property, it will re-render.
 
-We use the `zero.core/on` our root component to listen for click events. When the click occurs, `on-click` is called, and it increments the `incrementing-button`'s `clicks` attribute. Zero automatically re-renders the `incrementing-button`.
+To update our component, we use use the `zero.core/on` prop on the root to listen for click events. When the click occurs, `on-click` is called, and it increments the `incrementing-button`'s `clicks` property. `incrementing-button` re-renders automatically.
+
 
 ### Actions
 (This example will be similar to the previous, except it will use actions to eliminate some boilerplate around finding the host.)
