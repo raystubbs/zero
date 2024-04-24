@@ -48,7 +48,7 @@
   (when DEBUG
     (let [full-css-url (js/URL. (str css-url) js/location.origin)]
       (when (= js/location.origin (.-origin full-css-url))
-        (let [top-level-css-link-doms (js/document.querySelector "link[rel=\"stylesheet\"]")
+        (let [top-level-css-link-doms (array-seq (js/document.querySelectorAll "link[rel=\"stylesheet\"]"))
               existing-link-dom (some
                                   (fn [^js/HTMLLinkElement dom]
                                     (let [link-url (js/URL. (.-href dom) js/location.origin)]

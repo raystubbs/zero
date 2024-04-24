@@ -16,9 +16,6 @@
                  (some? data)
                  (conj (cond-> data (and file line) (conj [:loc (str file ":" line)])))
                  
-                 (and file line)
-                 (conj {:loc (str file ":" line)})
-                 
                  (some? ex)
                  (into ["\n" ex]))))
      :clj (binding [*out* *err*]
