@@ -101,7 +101,7 @@
             (let [[value state] (if (map? new-val)
                                   [(:value new-val) (:state new-val)]
                                   [new-val nil])]
-              (.setFormValue (or value "") (or state ""))))
+              (.setFormValue internals (or value "") (or state ""))))
 
           :zero.core/validity
           (when (.-formAssociated class)
