@@ -126,7 +126,7 @@ Zero also provides facilities for state management that resemble re-frame.
                        :props {:clicks (z/bnd ::db/path [:clicks])}})
 ```
 
-Here we have an in-memory database for our application. We bind our clicks prop to a path in the database, and then use the `::db/path` effect to update the value at the `:clicks` path.
+Here we have an in-memory database for our application. We bind our clicks prop to a path in the database, and then use the `::db/patch` effect to update the value at the `:clicks` path.
 
 ### And Beyond
 
