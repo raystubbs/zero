@@ -72,7 +72,7 @@ When we register our component, we declare `clicks` as a prop. When we update th
 
 To update our component, we use use the `zero.core/on` prop on the root to listen for click events. When the click occurs, `on-click` is called, and it increments the `incrementing-button`'s `clicks` property. `incrementing-button` re-renders automatically.
 
-### Atom
+### Atoms
 
 We can also use ClojureScript's built-in tools for state. Let's look at an example using an atom.
 
@@ -101,12 +101,38 @@ We can also use ClojureScript's built-in tools for state. Let's look at an examp
 
 Here we have bound the `clicks` prop to an atom. Similar to reagent, when that atom updates, our `incrementing-button` component re-renders.
 
-### Actions
-(This example will be similar to the previous, except it will use actions to eliminate some boilerplate around finding the host.)
-
-
 ### App DB
-(re-frame-esque example)
+
+Zero also provides facilities for state management that resemble re-frame.
+
+```clojurescript
+(ns increment-counter.client
+  (:require [zero.core :as z]
+            [zero.config :as zc]
+            [zero.component]
+            [zero.extras.db :as db]))
+
+;; Init db value
+(db/patch! [{:path [:clicks] :value 0}])
+
+(defn button-view
+  [{:keys [clicks]}]
+  [:root> {::z/on {:click (z/act [::db/patch [{:path [:clicks]
+                                               :fn inc}]])}}
+   [:button (str "Clicked " clicks " times")]])
+
+(zc/reg-components
+ :incrementing-button {:view button-view
+                       :props {:clicks (z/bnd ::db/path [:clicks])}})
+```
+
+Here we have an in-memory database for our application. We bind our clicks prop to a path in the database, and then use the `::db/path` effect to update the value at the `:clicks` path.
+
+### And Beyond
+
+Zero aims to be both simple and easy. It gives you options to follow familiar patterns for state management. But it also gives you the flexibility to manage state as you need to.
+
+For more details, check out the [User's Guide](doc/UsersGuide.md). The SSR Demo application provides further examples of Zero's state management.
 
 ## Warning
 Depends on modern browser APIs, works on the latest versions of all
