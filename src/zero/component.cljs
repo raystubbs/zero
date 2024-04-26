@@ -194,6 +194,19 @@
       (.insertBefore dom child next-child)
       (.appendChild dom child))))
 
+(defn try-pass-focus! [^js/Node dom]
+  (let [tab-index (.-tabIndex dom)
+        focus-fn (.-focus dom)]
+    (cond
+      (and (some? tab-index) (not (neg? tab-index)) (fn? focus-fn))
+      (.call focus-fn dom)
+
+      (instance? js/ShadowRoot dom)
+      (some-> dom .-host try-pass-focus!)
+
+      (not (identical? js/document.body dom))
+      (some-> dom .-parentNode try-pass-focus!))))
+
 (defn- apply-layout-changes [^js/Node dom start-index stop-index child-dom->source-index target-layout]
   (loop [boundary-index (dec start-index)
          next-target-index start-index]
@@ -311,6 +324,11 @@
 
     ;; remove expired children
     (doseq [child-dom source-layout :when (not (contains? preserved-child-doms child-dom))]
+      ;; if we need to remove a focused child, then first try to move focus to a focusable
+      ;; parent; otherwise the browser will default to focusing the <body>... which can case
+      ;; problems in many cases
+      (when (contains? focused-doms child-dom)
+        (try-pass-focus! (.-parentNode child-dom)))
       (.removeChild dom child-dom)
       (prepare-dom-to-be-detached child-dom !instance-state))))
 
@@ -593,16 +611,27 @@
                                          :doms-on-focus-path #{}})]
                   (gobj/set this dom/PRIVATE-SYM !instance-state)
                   (.addEventListener shadow "focusin"
-                    (fn [^js event]
+                    (fn [^js/FocusEvent event]
                       (let [event-path (.composedPath event)
                             shadow-index (.indexOf event-path (:shadow @!instance-state))]
                         (swap! !instance-state assoc :doms-on-focus-path (set (.slice event-path 0 shadow-index)))))
                     true)
                   (.addEventListener shadow "focusout"
-                    (fn [^js event]
-                      (when (or (nil? (.-relatedTarget event)) (not (.contains shadow (.-relatedTarget event))))
+                    (fn [^js/FocusEvent _event]
+                      (when (nil? (.-activeElement shadow))
                         (swap! !instance-state assoc :doms-on-focus-path #{})))
                     true)
+                  (.addEventListener this "focus"
+                    (fn [^js/FocusEvent _event]
+                      (when (pos? (or (get-in @!instance-state [:lifecycle-event-listener-counts "focus"]) 0))
+                        (.dispatchEvent shadow (js/FocusEvent. "focus"))))
+                    true)
+                  (.addEventListener this "blur"
+                    (fn [^js/FocusEvent _event]
+                      (when (pos? (or (get-in @!instance-state [:lifecycle-event-listener-counts "blur"]) 0))
+                        (.dispatchEvent shadow (js/FocusEvent. "blur"))))
+                    true)
+
                   (let [orig-add-event-listener (.bind (.-addEventListener shadow) shadow)
                         orig-remove-event-listener (.bind (.-removeEventListener shadow) shadow)]
                     (js/Object.defineProperties shadow
@@ -610,7 +639,7 @@
                           #js{:value
                               (fn add-event-listener-override [type & others]
                                 (case type
-                                  ("connect" "disconnect" "update" "render")
+                                  ("connect" "disconnect" "update" "render" "focus" "blur")
                                   (swap! !instance-state update-in [:lifecycle-event-listener-counts type] (fnil inc 0))
                                   nil)
                                 (apply orig-add-event-listener type others))
@@ -620,7 +649,7 @@
                           #js{:value
                               (fn remove-event-listener-override [type & others]
                                 (case type
-                                  ("connect" "disconnect" "update" "render")
+                                  ("connect" "disconnect" "update" "render" "focus" "blur")
                                   (swap! !instance-state update-in [:lifecycle-event-listener-counts type] (fnil dec 0))
                                   nil)
                                 (apply orig-remove-event-listener type others))
