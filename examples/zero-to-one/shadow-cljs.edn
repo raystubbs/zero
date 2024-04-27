@@ -1,0 +1,13 @@
+;; shadow-cljs configuration
+{:dev-http {8000 "public"
+            9000 "out/test"}
+
+ :source-paths ["src" "test"]
+
+ :dependencies [[me.raystubbs/zero "0.1.7"]]
+
+ :builds {:app {:target :browser
+                :modules {:main {:entries [zero-to-one.client]}}}
+          :test {:target :browser-test
+                 :test-dir  "out/test"}}}
+

@@ -1,0 +1,27 @@
+html, body {
+  background-color: oklch(0.253267 0.015896 252.418);
+}
+
+body {
+  height: 100vh;
+  margin: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+button {
+  align-items: center;
+  background-color: oklab(0.59121 0.0176732 -0.175512);
+  border: solid 1px oklab(0.59121 0.0176732 -0.175512);
+  color: oklch(0.13138 0.0392 275.75);
+  cursor: pointer;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont;
+  font-size: 14px;
+  font-weight: 600;
+  height: 48px;
+  justify-content: center;
+  line-height: 14px;
+  min-height: 48px;
+  padding: 0px 16px;
+}
