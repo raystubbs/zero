@@ -138,7 +138,7 @@
 
         ;; patch binds
         (doseq [[k [old-val new-val]] (diff :zero.core/bind)]
-          (when (some? old-val)
+          (when (some? (log/spy old-val))
             (dom/unbind [old-val dom k]))
           (when (some? new-val)
             (dom/bind [new-val dom k] dom k new-val)))
@@ -170,7 +170,8 @@
 (defn- prepare-dom-to-be-detached [^js/Node dom !instance-state]
   (let [props (gobj/get dom dom/PROPS-SYM)]
     (doseq [[k watchable] (:zero.core/bind props)]
-      (dom/unbind [watchable dom k]))
+      (when (some? watchable)
+        (dom/unbind [watchable dom k])))
     (gobj/set dom dom/PROPS-SYM (dissoc props :zero.core/bind)))
   (doseq [child-dom (-> dom .-childNodes array-seq)]
     (prepare-dom-to-be-detached child-dom !instance-state))
