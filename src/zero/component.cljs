@@ -138,7 +138,7 @@
 
         ;; patch binds
         (doseq [[k [old-val new-val]] (diff :zero.core/bind)]
-          (when (some? (log/spy old-val))
+          (when (some? old-val)
             (dom/unbind [old-val dom k]))
           (when (some? new-val)
             (dom/bind [new-val dom k] dom k new-val)))
