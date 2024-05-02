@@ -12,7 +12,7 @@ A toolkit for building web components in Clojure and ClojureScript.
 *Micro-frontends*. Web components are [ideal for micro-frontends](https://micro-frontends.org/). Your team can use Zero alongside other teams using React or Svelte - in the same application.
 
 *State-heavy SPAs*. Zero provides a set of state management tools from the simple and easy to the simple and sophisticated. Start easy and scale up as you need to.
-
+ 
 ## Highlights
 - Depends only on ClojureScript core
 - Small, with optional 'extras' modules for more features
