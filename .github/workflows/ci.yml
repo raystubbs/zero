@@ -32,8 +32,8 @@ jobs:
             ~/.m2/repository
             ~/node_modules
             ~/.cpcache
-          key: deps-${{ hashFiles('deps.edn', 'package.json') }}
-          restore-keys: deps-
+          key: deps2-${{ hashFiles('deps.edn', 'package.json') }}
+          restore-keys: deps2-
       - name: Install Yarn dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: yarn
