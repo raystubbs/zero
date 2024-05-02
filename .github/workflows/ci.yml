@@ -10,7 +10,7 @@ on:
       - 'package.json'
       - 'shadow-cljs.edn'
       - 'yarn.lock'
-      - 'ci.yml'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [ main ]
     paths:
@@ -20,7 +20,7 @@ on:
       - 'package.json'
       - 'shadow-cljs.edn'
       - 'yarn.lock'
-      - 'ci.yml'
+      - '.github/workflows/ci.yml'
 
 jobs:
   test:
