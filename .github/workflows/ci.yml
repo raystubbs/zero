@@ -1,10 +1,26 @@
-name: Test
+name: CI
 
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'deps.edn'
+      - 'package.json'
+      - 'shadow-cljs.edn'
+      - 'yarn.lock'
+      - 'ci.yml'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'deps.edn'
+      - 'package.json'
+      - 'shadow-cljs.edn'
+      - 'yarn.lock'
+      - 'ci.yml'
 
 jobs:
   test:
