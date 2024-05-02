@@ -24,6 +24,7 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: v22.x
+          cache: 'yarn'
       - name: Cache dependencies
         id: cache-deps
         uses: actions/cache@v3
@@ -32,10 +33,9 @@ jobs:
             ~/.m2/repository
             ~/node_modules
             ~/.cpcache
-          key: deps2-${{ hashFiles('deps.edn', 'package.json') }}
-          restore-keys: deps2-
+          key: deps-${{ hashFiles('deps.edn', 'package.json') }}
+          restore-keys: deps-
       - name: Install Yarn dependencies
-        if: steps.cache-deps.outputs.cache-hit != 'true'
         run: yarn
       - name: Run tests
         run: yarn test
