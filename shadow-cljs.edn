@@ -4,5 +4,4 @@
  {:tests
   {:target :esm
    :output-dir "target/tests"
-   :compiler-options {:optimizations :none :source-map true}
    :modules {:all {:entries [zero.cljs.component-test]}}}}}

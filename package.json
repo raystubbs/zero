@@ -3,6 +3,7 @@
     "test": "shadow-cljs compile tests && web-test-runner \"target/tests/all.js\" --node-resolve"
   },
   "devDependencies": {
-    "@web/test-runner": "^0.18.1"
+    "@web/test-runner": "^0.18.1",
+    "shadow-cljs": "^2.28.4"
   }
 }
