@@ -1,5 +1,6 @@
 
 [![Clojars Project](https://img.shields.io/clojars/v/me.raystubbs/zero.svg)](https://clojars.org/me.raystubbs/zero)
+![Test Badge](https://github.com/raystubbs/zero/actions/workflows/ci.yml/badge.svg)
 
 # Zero
 A toolkit for building web components in Clojure and ClojureScript.
@@ -46,7 +47,7 @@ This can be implemented a few different ways. We will consider several examples,
 Zero makes custom component reactive. Similar to React's notion that a view is a function of its props, we can render a web component as a function of its properties.
 
 
-```clojurescript
+```clojure
 (ns increment-counter
   (:require [zero.core :as z]
             [zero.config :as zc]
@@ -76,7 +77,7 @@ To update our component, we use use the `zero.core/on` prop on the root to liste
 
 We can also use ClojureScript's built-in tools for state. Let's look at an example using an atom.
 
-```clojurescript
+```clojure
 (ns increment-counter
   (:require [zero.core :as z]
             [zero.config :as zc]
@@ -105,7 +106,7 @@ Here we have bound the `clicks` prop to an atom. Similar to reagent, when that a
 
 Zero also provides facilities for state management that resemble re-frame.
 
-```clojurescript
+```clojure
 (ns increment-counter.client
   (:require [zero.core :as z]
             [zero.config :as zc]
