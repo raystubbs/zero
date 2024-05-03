@@ -103,7 +103,7 @@
           (cond
             (or (string? k) (nil? (namespace k))) 
             (let [attr-name (name k)
-                  attr-val (-> v (write-attribute v attr-name tag) str)]
+                  attr-val (-> v (write-attribute attr-name tag) str)]
               (write w \space attr-name \= \" (escape-quotes attr-val) \"))
             
             :else
