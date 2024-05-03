@@ -6,7 +6,8 @@
    [zero.impl.base :refer [str-writer str-writer->str write] :as base]
    [zero.core :as z]
    [zero.dom :as-alias dom]
-   [zero.config :as zconfig])
+   [zero.config :as zconfig]
+   [zero.logger :as log])
   #?(:clj
      (:import
       [java.net URI URL])))
@@ -79,8 +80,9 @@
   (persistent!
     (reduce-kv
       (fn [m k v]
-        (cond-> m (or (string? k) (nil? (namespace k)))
-          (assoc! (-> k name str/lower-case) v)))
+        (if (or (string? k) (nil? (namespace k)))
+          (assoc! m (-> k name str/lower-case) v)
+          (assoc! m k v)))
       (transient {})
       props)))
 
@@ -107,7 +109,7 @@
               (write w \space attr-name \= \" (escape-quotes attr-val) \"))
             
             :else
-            (case k
+            (case (log/spy k)
               ::z/class
               (let [classes (flatten (::z/class props))]
                 (when (seq classes)
