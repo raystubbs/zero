@@ -109,7 +109,7 @@
               (write w \space attr-name \= \" (escape-quotes attr-val) \"))
             
             :else
-            (case (log/spy k)
+            (case k
               ::z/class
               (let [classes (flatten (::z/class props))]
                 (when (seq classes)
