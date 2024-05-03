@@ -1,21 +1,9 @@
 (ns zero.extras.cdf
   (:require
    [clojure.string :as str]
-   [zero.core :as z])
-  #?(:clj (:import [java.io StringWriter] [java.util ArrayList])
-     :cljs (:import [goog.string StringBuffer])))
-
-#?(:clj (defn- str-writer [] (StringWriter.))
-   :cljs (defn- str-writer [] (->StringBufferWriter (StringBuffer.))))
-
-#?(:clj (defn- write-char [^StringWriter w c] (.append w ^char c))
-   :cljs (defn- write-char [w c] (-write w c)))
-
-#?(:clj (defn- write [^StringWriter w ^String s] (.write w s))
-   :cljs (defn- write [w s] (-write w s)))
-
-#?(:clj (defn- str-writer->str [w] (.toString w))
-   :cljs (defn str-writer->str [w] (-> ^js w .-sb .toString)))
+   [zero.core :as z]
+   [zero.impl.base :refer [str-writer str-writer->str write]])
+  #?(:clj (:import[java.util ArrayList])))
 
 #?(:clj (defn- mut-list [] (ArrayList.))
    :cljs (defn- mut-list [] #js[]))
@@ -51,13 +39,13 @@
             (\+ \-)
             (if (or (= i start-index) (= (nth s (dec i)) "e"))
               (do
-                (write-char w c)
+                (write w c)
                 (recur (inc i) stage))
               (throw (ex-info "unexpected character" {:idx i :char c})))
 
             (\0 \1 \2 \3 \4 \5 \6 \7 \8 \9)
             (do
-              (write-char w c)
+              (write w c)
               (recur (inc i) stage))
 
             \.
@@ -68,7 +56,7 @@
                 (throw (ex-info "expected digit" {:idx i :char (nth s (dec i))}))
 
                 (do
-                  (write-char w c)
+                  (write w c)
                   (recur (inc i) stage)))
 
               :decimal
@@ -106,7 +94,7 @@
               [(keyword (str-writer->str w)) i])
 
             (do
-              (write-char w c)
+              (write w c)
               (recur (inc i)))))))))
 
 (defn count-quotes [s start-index]
@@ -127,7 +115,7 @@
           (if (and (= c \`) (<= opening-qcount (count-quotes s i)))
             [(str-writer->str w) (+ i opening-qcount)]
             (do
-              (write-char w c)
+              (write w c)
               (recur (inc i)))))))))
 
 (defn parse-ident [s start-index _opts]
@@ -142,7 +130,7 @@
 
             (if (graphical-char? c)
               (do
-                (write-char w c)
+                (write w c)
                 (recur (inc i)))
               (throw (ex-info "unexpected character" {:idx i})))))))))
 
@@ -283,35 +271,35 @@
       cur-max)))
 
 (defn- write-map [w x opts]
-  (write-char w \{)
+  (write w \{)
   (when-let [[first-k first-v] (first x)]
     (write-val w first-k opts)
-    (write-char w \space)
+    (write w \space)
     (write-val w first-v opts)
     (doseq [[k v] (rest x)]
-      (write-char w \space)
+      (write w \space)
       (write-val w k opts)
-      (write-char w \space)
+      (write w \space)
       (write-val w v opts)))
-  (write-char w \}))
+  (write w \}))
 
 (defn- write-seq [w x opts]
-  (write-char w \[)
+  (write w \[)
   (when (seq x)
     (let [first-v (first x)]
       (write-val w first-v opts))
     (doseq [v (rest x)]
-      (write-char w \space)
+      (write w \space)
       (write-val w v opts)))
-  (write-char w \]))
+  (write w \]))
 
 (defn- write-op [w x opts]
-  (write-char w \()
+  (write w \()
   (write w (pr-str (first x)))
   (doseq [v (rest x)]
-    (write-char w \space)
+    (write w \space)
     (write-val w v opts))
-  (write-char w \)))
+  (write w \)))
 
 (defn- write-val [w x {:keys [top?] :as opts}]
   (let [x ((:mapper opts) x)
@@ -353,7 +341,7 @@
       (cond
         (= "" x)
         (when-not top?
-          (write-char w \E))
+          (write w \E))
 
         (or (= (nth x 0) \`) (= (nth x (dec (count x))) \`))
         (throw (ex-info "back ticks (`) aren't allowed at the start or end of strings" {:x x}))
@@ -365,10 +353,10 @@
         (let [contains-qcount (max-quotes-count x)
               surround-qcount (inc contains-qcount)]
           (dotimes [_ surround-qcount]
-            (write-char w \`))
+            (write w \`))
           (write w x)
           (dotimes [_ surround-qcount]
-            (write-char w \`))))
+            (write w \`))))
 
       (map? x)
       (write-map w x nested-opts)

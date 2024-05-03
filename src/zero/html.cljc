@@ -3,7 +3,7 @@
    [clojure.string :as str]
    [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name flatten-body]]
    [zero.impl.injection :refer [apply-injections]]
-   [zero.impl.base :as base]
+   [zero.impl.base :refer [str-writer str-writer->str write] :as base]
    [zero.core :as z]
    [zero.dom :as-alias dom]
    [zero.config :as zconfig])
@@ -11,9 +11,9 @@
      (:import
       [java.net URI URL])))
 
-(declare vnode->html)
+(declare write-vnode)
 
-(defn maybe-shadow-dom [tag markup-props]
+(defn maybe-write-shadow-dom [w tag markup-props opts]
   (let [spec (get-in @zconfig/!registry [:components tag])]
     (when (::render? spec)
       (let [spec-props (if (set? (:props spec))
@@ -22,51 +22,45 @@
             view-props (->> spec-props
                          (keep
                            (fn [[k v]]
-                             [k
-                              (cond
-                                (or
-                                  (= v :default)
-                                  (= v :field)
-                                  (and
-                                    (map? v)
-                                    (::use? v)
-                                    (string? (:field v))
-                                    (not (:state v))
-                                    (not (:state-factory v))))
-                                (get markup-props k)
+                             (cond
+                               (or
+                                 (= v :default)
+                                 (= v :field)
+                                 (and
+                                   (map? v)
+                                   (string? (:field v))
+                                   (not (:state v))
+                                   (not (:state-factory v))))
+                               [k (get markup-props (-> k name str/lower-case))]
 
-                                (or
-                                  (= v :attr)
-                                  (and
-                                    (map? v)
-                                    (::use? v)
-                                    (string? (:attr v))
-                                    (not (:state v))
-                                    (not (:state-factory v))))
-                                (let [writer (zconfig/get-attr-writer tag)
-                                      reader (zconfig/get-attr-reader tag)]
-                                  (reader (writer (get markup-props k))))
+                               (or
+                                 (= v :attr)
+                                 (and
+                                   (map? v)
+                                   (string? (:attr v))
+                                   (not (:state v))
+                                   (not (:state-factory v))))
+                               (let [writer (zconfig/get-attr-writer tag)
+                                     reader (zconfig/get-attr-reader tag)]
+                                 [k (reader (writer (get markup-props (-> k name str/lower-case))))])
 
-                                (and (map? v) (::use? v))
-                                (if-let [state (:state v)]
-                                  (base/try-deref state)
-                                  (throw
-                                    (ex-info "Prop marked as usable for `zero.html`, but isn't"
-                                      {:component tag :prop k}))))]))
-                         vec
+                               (:state v)
+                               [k (base/try-deref v)])))
                          (into {}))
             view-result ((:view spec) view-props)
-            [shadow-root-props shadow-root-body] (cond
-                                                   (and (vector? view-result) (= (first view-result) :root>))
-                                                   (let [[_ props body] (preproc-vnode view-result)]
-                                                     [props body])
+            [shadow-root-props
+             shadow-root-body] (cond
+                                 (and
+                                   (vector? view-result)
+                                   (= (first view-result) :root>))
+                                 (-> view-result preproc-vnode rest)
 
-                                                   (seq? view-result)
-                                                   [{} view-result]
+                                 (seq? view-result)
+                                 [{} view-result]
 
-                                                   :else
-                                                   [{} [view-result]])]
-        (vnode->html
+                                 :else
+                                 [{} [view-result]])]
+        (write-vnode w
           (into [:template :shadowrootmode "open"]
             (concat shadow-root-body
               (keep
@@ -78,81 +72,99 @@
                     [:link :rel "stylesheet" :href (str css-val)]))
                 (if (coll? (::z/css shadow-root-props))
                   (::z/css shadow-root-props)
-                  [(::z/css shadow-root-props)])))))))))
+                  [(::z/css shadow-root-props)]))))
+          opts)))))
 
-(defn- vnode->html [vnode]
+(defn normalize-prop-names [props]
+  (persistent!
+    (reduce-kv
+      (fn [m k v]
+        (cond-> m (or (string? k) (nil? (namespace k)))
+          (assoc! (-> k name str/lower-case) v)))
+      (transient {})
+      props)))
+
+(defn escape-quotes [s]
+  (str/replace s #"\"" "&quot;"))
+
+(defn- write-vnode [w vnode opts]
   (cond
     (vector? vnode)
     (let [[tag props body] (preproc-vnode vnode)
           write-attribute (zconfig/get-attr-writer tag)
-          html-attrs (reduce-kv
-                       (fn [agg k v]
-                         (cond
-                           (= k ::z/class)
-                           (assoc agg (name k)
-                             (cond
-                               (coll? v) (str/join " " (flatten v))
-                               (or (symbol? v) (keyword? v)) (name v)
-                               :else (str v)))
-
-                           (= k ::z/style)
-                           (do
-                             (assert (map? v))
-                             (assoc agg (name k)
-                               (str/join (map #(str (name (key %)) ":" (clj->css-property (val %)) ";") v))))
-
-                           (and (some? v) (nil? (namespace k)))
-                           (let [attr-name (name k)
-                                 attr-value (write-attribute v attr-name tag)]
-                             (cond-> agg
-                               (some? attr-value)
-                               (assoc (name k) attr-value)))
-
-                           :else
-                           agg))
-                       {}
-                       props)
-          html-attrs (cond-> html-attrs
-                       (and (nil? (get html-attrs "id")) (or (some? (::z/bind props)) (some? (::z/on props))))
-                       (assoc "id" (name (gensym))))
+          props (normalize-prop-names props)
+          needs-id? (some some? (concat (vals (::z/bind props)) (vals (::z/on props))))
+          has-id? (contains? props "id")
+          props (cond-> props (and needs-id? (not has-id?)) (assoc "id" (name (gensym)))) 
           html-tag (kw->el-name tag)]
-      (str
-        "<" html-tag
-        (when (seq html-attrs)
-          (str " "
-            (->> html-attrs
-              (map #(str (key %) "=\"" (str/replace (str (val %)) #"\"" "&quot;") "\""))
-              (str/join " "))))
-        ">"
-        (maybe-shadow-dom tag props)
-        (cond
-          (= "script" html-tag)
-          (->> body str/join)
-          
-          :else
-          (->> body (map vnode->html) str/join)) 
-        "</" html-tag ">"
-        (->>
-          (concat
-            (map
-              (fn [[k v]]
-                [::dom/listen
-                 {:sel (str "#" (get html-attrs "id"))
-                  :evt k
-                  :act v}])
-              (::z/on props))
-            (map
-              (fn [[k v]]
-                [::dom/bind
-                 {:sel (str "#" (get html-attrs "id"))
-                  :prop k
-                  :ref v}])
-              (::z/bind props)))
-          (map vnode->html)
-          str/join)))
+      (write w \< html-tag)
+      (when (seq props)
+        (doseq [[k v] props :when (keyword k)]
+          (cond
+            (or (string? k) (nil? (namespace k))) 
+            (let [attr-name (name k)
+                  attr-val (-> v (write-attribute v attr-name tag) str)]
+              (write w \space attr-name \= \" (escape-quotes attr-val) \"))
+            
+            :else
+            (case k
+              ::z/class
+              (let [classes (flatten (::z/class props))]
+                (when (seq classes)
+                  (write w " class=\"" (-> classes first name escape-quotes))
+                  (doseq [class (rest classes)]
+                    (write w \space (-> class name escape-quotes)))
+                  (write w \")))
+              
+              ::z/style
+              (let [style (::z/style props)]
+                (when (seq style)
+                  (write w " style=\"")
+                  (doseq [[k v] (::z/style props) :when (some? v)]
+                    (write w (name k) \: (-> v clj->css-property escape-quotes) \;))
+                  (write w \")))
+              
+              nil))))
+      (write w \>)
+      (maybe-write-shadow-dom w tag props opts)
+      (cond
+        (= "script" html-tag)
+        (doseq [x body]
+          (write w x))
+        
+        :else
+        (doseq [x body]
+          (write-vnode w x opts)))
+      (write w \< \/ html-tag \>)
+      
+      (let [node-selector (str "#" (get props "id"))]
+        (doseq [[k v] (::z/on props)]
+          (write-vnode w
+            [::dom/listen
+             {:sel node-selector
+              :evt k
+              :act v}]
+            opts))
+        
+        (doseq [[k v] (::z/bind props)]
+          (write-vnode w
+            [::dom/bind
+             {:sel node-selector
+              :prop k
+              :ref v}]
+            opts))))
 
     :else
-    (-> vnode str (str/replace #"[<>]" #(case % "<" "&gt;" ">" "&lt;")))))
+    (write w (-> vnode str (str/replace #"[<>]" #(case % "<" "&gt;" ">" "&lt;"))))))
 
-(defn html [& markup]
-  (str/join (map vnode->html (flatten-body (apply-injections markup {})))))
+(defn write-html [w & args]
+  (let [[opts markup] (if (map? (first args)) [(first args) (rest args)] [{} args])]
+    (when-let [doctype (:doctype opts)]
+      (write w "<!DOCTYPE " doctype ">"))
+    (doseq [vnode (flatten-body (apply-injections markup (or (:context opts) {})))]
+      (write-vnode w vnode opts))))
+
+(defn html [& args]
+  (let [w (str-writer)]
+    (apply write-html w args)
+    (str-writer->str w)))

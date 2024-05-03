@@ -1,7 +1,7 @@
-{:deps {:aliases [:test]}
+{:deps {:aliases [:test-browser]}
  
  :builds
- {:tests
+ {:browser-tests
   {:target :esm
-   :output-dir "target/tests"
-   :modules {:all {:entries [zero.cljs.component-test]}}}}}
+   :output-dir "target/browser-tests"
+   :modules {:all {:entries [zero.browser.component-test]}}}}}

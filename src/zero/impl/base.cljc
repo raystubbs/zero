@@ -4,7 +4,11 @@
    [clojure.string :as str])
   #?(:clj
      (:import
-       (clojure.lang Named))))
+      (clojure.lang Named)
+      (java.io StringWriter Writer))
+     :cljs
+     (:import
+      (goog.string StringBuffer))))
 
 (defn words [s]
   (str/split s #"\s+|(?<=[^_-])[_-]+(?=[^_-])|(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"))
@@ -65,3 +69,18 @@
   (or (string? x)
     #?(:cljs (satisfies? INamed x)
        :clj (instance? Named x))))
+
+#?(:clj (defn str-writer [] (StringWriter.))
+   :cljs (defn str-writer [] (->StringBufferWriter (StringBuffer.))))
+
+#?(:clj (defn write [^Writer w & vs]
+          (doseq [v vs]
+            (if (char? v)
+              (.write w (int v))
+              (.write w (str v)))))
+   :cljs (defn write [w & vs]
+           (doseq [v vs]
+             (-write w (str v)))))
+
+#?(:clj (defn str-writer->str [w] (.toString w))
+   :cljs (defn str-writer->str [w] (-> ^js w .-sb .toString)))
