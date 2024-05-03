@@ -22,13 +22,17 @@
       (html/html [:div :foo "\"bar\""])
       "<div foo=\"&quot;bar&quot;\"></div>"))
   (is
-    (not
-      (str/includes?
-        (html/html
-          [:div
-           ::z/class ["something" "\"other\""]
-           ::z/style {:font-family "\"Something\""}])
-        "\""))))
+    (str/includes?
+      (html/html
+        [:div
+         ::z/class ["something" "\"other\""]])
+      "&quot;other&quot;"))
+  (is
+    (str/includes?
+      (html/html
+        [:div
+         ::z/style {:font-family "\"Something\""}])
+      "&quot;Something&quot;")))
 
 (deftest doctype
   (is
