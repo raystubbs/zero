@@ -1,4 +1,4 @@
-(ns zero.impl.actions
+(ns ^:no-doc zero.impl.actions
   (:require
     [zero.impl.injection :refer [apply-injections]]
     [zero.config :as config])

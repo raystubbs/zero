@@ -1,4 +1,6 @@
-(ns zero.component
+(ns zero.component "
+Implements web components.  Require this ns to enable them.
+"
   (:require
     [clojure.set :as set]
     [zero.impl.base :as base]
@@ -11,7 +13,8 @@
     [goog :refer [DEBUG]]
     [zero.logger :as log]))
 
-(defn- css [s]
+(defn- css
+  [s]
   (doto (js/CSSStyleSheet.) (.replaceSync s)))
 
 (defonce ^:private HTML-NS "http://www.w3.org/1999/xhtml")
@@ -20,12 +23,14 @@
 (def ^:private DEFAULT-CSS (css ":host { display: contents; }"))
 (def ^:private JS-UNDEFINED (js* "undefined"))
 
-(defn- default-ns [tag]
+(defn- default-ns
+  [tag]
   (case tag
     :svg SVG-NS
     nil))
 
-(defn- diff-shallow [map-a map-b ks]
+(defn- diff-shallow
+  [map-a map-b ks]
   (reduce
     (fn [diff key]
       (let [val-a (get map-a key)
@@ -35,7 +40,8 @@
           (assoc diff key [val-a val-b]))))
     {} ks))
 
-(defn diff-props [old-props new-props]
+(defn- diff-props
+  [old-props new-props]
   (let [all-keys (merge old-props new-props)
         deep-keys [:zero.core/style :zero.core/on :zero.core/internals :zero.core/bind]]
     (as-> all-keys $
@@ -54,15 +60,18 @@
                 (assoc diff key inner-diff)))))
         $ deep-keys))))
 
-(defn coll->validity-flags-obj [coll]
+(defn- coll->validity-flags-obj
+  [coll]
   (let [obj #js{}]
     (doseq [field-name (->> coll (filter base/named?) (map (comp base/cammel-case name)))]
       (gobj/set obj field-name true))
     obj))
 
-(defonce ^:private internals-fields-index (dom/class->fields-index js/ElementInternals))
+(defonce ^:private internals-fields-index
+  (dom/class->fields-index js/ElementInternals))
 
-(defn- patch-root-props [^js/ShadowRoot dom ^js/ElementInternals internals ^js class props]
+(defn- patch-root-props
+  [^js/ShadowRoot dom ^js/ElementInternals internals ^js class props]
   (let [old-props (gobj/get dom dom/PROPS-SYM)
         diff (diff-props old-props props)
         ^js host-css (or (gobj/get dom HOST-CSS-SYM)
@@ -116,10 +125,11 @@
             (gobj/set internals field-name new-val)))))
 
       ;; TODO: element internals (i.e aria, etc.)
-
+    
     (gobj/set dom dom/PROPS-SYM props)))
 
-(defn- patch-props [^js/Node dom props]
+(defn- patch-props
+  [^js/Node dom props]
   (let [diff (diff-props (or (gobj/get dom dom/PROPS-SYM) {}) props)]
     (when-not (empty? diff)
       (let [fields-index (-> dom .-constructor dom/class->fields-index)
@@ -167,7 +177,8 @@
             (set! (.-className dom) (str class))))
         (gobj/set dom dom/PROPS-SYM props)))))
 
-(defn- prepare-dom-to-be-detached [^js/Node dom !instance-state]
+(defn- prepare-dom-to-be-detached
+  [^js/Node dom !instance-state]
   (let [props (gobj/get dom dom/PROPS-SYM)]
     (doseq [[k watchable] (:zero.core/bind props)]
       (when (some? watchable)
@@ -178,7 +189,8 @@
   (when (and DEBUG (= (.-nodeName dom) "LINK"))
     (dom/on-css-link-removed! dom)))
 
-(defn insert-child! [^js/Node dom ^js/Node reference ^js/Node child]
+(defn- insert-child!
+  [^js/Node dom ^js/Node reference ^js/Node child]
   (cond
     (nil? reference)
     (if (fn? (.-prepend dom))
@@ -195,7 +207,8 @@
       (.insertBefore dom child next-child)
       (.appendChild dom child))))
 
-(defn try-pass-focus! [^js/Node dom]
+(defn- try-pass-focus!
+  [^js/Node dom]
   (let [tab-index (.-tabIndex dom)
         focus-fn (.-focus dom)]
     (cond
@@ -208,7 +221,8 @@
       (not (identical? js/document.body dom))
       (some-> dom .-parentNode try-pass-focus!))))
 
-(defn- apply-layout-changes [^js/Node dom start-index stop-index child-dom->source-index target-layout]
+(defn- apply-layout-changes
+  [^js/Node dom start-index stop-index child-dom->source-index target-layout]
   (loop [boundary-index (dec start-index)
          next-target-index start-index]
     (if (<= stop-index next-target-index)
@@ -238,7 +252,8 @@
             (insert-child! dom boundary-dom next-child-dom)
             (recur next-target-index (inc next-target-index))))))))
 
-(defn- patch-children [^js/Node dom !instance-state children]
+(defn- patch-children
+  [^js/Node dom !instance-state children]
   (let [source-layout (-> dom .-childNodes array-seq vec)
         !child-doms (atom
                       (group-by
@@ -333,7 +348,8 @@
       (.removeChild dom child-dom)
       (prepare-dom-to-be-detached child-dom !instance-state))))
 
-(defn- patch-root [^js/ShadowRoot dom ^js/ElementInternals internals !instance-state vnode]
+(defn- patch-root
+  [^js/ShadowRoot dom ^js/ElementInternals internals !instance-state vnode]
   (let [class (-> dom .-host .-constructor)
         !static-state (gobj/get class dom/PRIVATE-SYM)
         default-css (:default-css @!static-state)
@@ -356,7 +372,8 @@
       (when-not (:zero.core/opaque? props)
         (patch-children dom !instance-state body)))))
 
-(defn- normalize-prop-spec [prop-name prop-spec]
+(defn- normalize-prop-spec
+  [prop-name prop-spec]
   (case prop-spec
     :attr {:attr (-> prop-name name base/snake-case)
            :prop prop-name}
@@ -386,7 +403,8 @@
 (defonce ^:private !dirty (atom #{}))
 (defonce ^:private !render-frame-id (atom nil))
 
-(defn- render []
+(defn- render
+  []
   (reset! !render-frame-id nil)
   (while (seq @!dirty)
     (let [batch @!dirty]
@@ -439,12 +457,14 @@
                   (when (contains? observed-events "render")
                     (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))))
 
-(defn- request-render [^js/Node dom]
+(defn- request-render
+  [^js/Node dom]
   (swap! !dirty conj dom)
   (when-not @!render-frame-id
     (reset! !render-frame-id (js/requestAnimationFrame render))))
 
-(defn- patch-el-class [class component-name {:keys [props view focus inherit-doc-css? form-associated?]}]
+(defn- patch-el-class
+  [class component-name {:keys [props view focus inherit-doc-css? form-associated?]}]
   (let [^js proto (.-prototype class)
         !static-state (gobj/get class dom/PRIVATE-SYM)
         props-map (cond
@@ -586,7 +606,7 @@
       (init-props instance)
       (request-render instance))))
 
-(defn update-component [component-name {:keys [props view focus] :as things}]
+(defn- update-component [component-name {:keys [props view focus] :as things}]
   (let [el-name (kw->el-name component-name)]
     (if-let [existing (js/customElements.get el-name)]
       (patch-el-class existing component-name things)
@@ -662,7 +682,7 @@
         (js/customElements.define el-name new-class))))
   nil)
 
-(defn update-components [{old-components :components} {new-components :components}]
+(defn- update-components [{old-components :components} {new-components :components}]
   (when-not (identical? old-components new-components)
     (doseq [[component-name component-spec :as new-component-entry] new-components
             :when (not= new-component-entry (find old-components component-name))]

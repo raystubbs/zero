@@ -1,4 +1,11 @@
-(ns zero.html
+(ns zero.html "
+Functions for rendering Zero markup as HTML.
+
+For vector forms with tags matching registered
+elements, and whose registration includes a
+`:zero.html/render? true` option; the components
+view will be rendered as a declarative shadow DOM.
+"
   (:require
    [clojure.string :as str]
    [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name flatten-body]]
@@ -12,9 +19,10 @@
      (:import
       [java.net URI URL])))
 
-(declare write-vnode)
+(declare ^:private write-vnode)
 
-(defn maybe-write-shadow-dom [w tag markup-props opts]
+(defn- maybe-write-shadow-dom
+  [w tag markup-props opts]
   (let [spec (get-in @zconfig/!registry [:components tag])]
     (when (::render? spec)
       (let [spec-props (if (set? (:props spec))
@@ -76,7 +84,8 @@
                   [(::z/css shadow-root-props)]))))
           opts)))))
 
-(defn normalize-prop-names [props]
+(defn- normalize-prop-names
+  [props]
   (persistent!
     (reduce-kv
       (fn [m k v]
@@ -86,10 +95,12 @@
       (transient {})
       props)))
 
-(defn escape-quotes [s]
+(defn- escape-quotes
+  [s]
   (str/replace s #"\"" "&quot;"))
 
-(defn- write-vnode [w vnode opts]
+(defn- write-vnode
+  [w vnode opts]
   (cond
     (vector? vnode)
     (let [[tag props body] (preproc-vnode vnode)
@@ -159,14 +170,26 @@
     :else
     (write w (-> vnode str (str/replace #"[<>]" #(case % "<" "&gt;" ">" "&lt;"))))))
 
-(defn write-html [w & args]
+(defn write-html "
+Write Zero markup to a writer as HTML.
+"
+  {:arglists
+   '[[w & markup]
+     [w & {:keys [doctype]} & markup]]}
+  [w & args]
   (let [[opts markup] (if (map? (first args)) [(first args) (rest args)] [{} args])]
     (when-let [doctype (:doctype opts)]
       (write w "<!DOCTYPE " doctype ">"))
     (doseq [vnode (flatten-body (apply-injections markup (or (:context opts) {})))]
       (write-vnode w vnode opts))))
 
-(defn html [& args]
+(defn html "
+Format Zero markup as an HTML string.
+"
+  {:arglists
+   '[[& markup]
+     [{:keys [doctype]} & markup]]}
+  [& args]
   (let [w (str-writer)]
     (apply write-html w args)
     (str-writer->str w)))

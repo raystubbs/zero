@@ -1,4 +1,4 @@
-(ns zero.impl.dom
+(ns ^:no-doc zero.impl.dom
   (:require
    [goog.object :as gobj]
    [goog :refer [DEBUG]]

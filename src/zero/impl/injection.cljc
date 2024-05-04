@@ -1,4 +1,4 @@
-(ns zero.impl.injection
+(ns ^:no-doc zero.impl.injection
   (:require
    [clojure.walk :refer [postwalk]]
    [zero.logger :as log]

@@ -7,21 +7,26 @@
    [clojure.string :as str]
    [goog.object :as gobj]))
 
-(defn bind [k ^js/Node dom prop-name watchable]
+(defn bind
+  [k ^js/Node dom prop-name watchable]
   (dom/bind k dom prop-name watchable))
 
-(defn unbind [k]
+(defn unbind
+  [k]
   (dom/unbind k))
 
-(defn listen [k ^js/Node dom-or-doms event-name listener-fn & {:keys [once? capture? passive? signal] :as opts}]
+(defn listen
+  [k ^js/Node dom-or-doms event-name listener-fn & {:keys [once? capture? passive? signal] :as opts}]
   (dom/listen k dom-or-doms event-name listener-fn opts))
 
-(defn unlisten [k]
+(defn unlisten
+  [k]
   (dom/unlisten k))
 
 (defonce ^:private INTERNAL-STATE-SYM (js/Symbol "zInternalState"))
 
-(defn set-internal-state [^js/Node dom new-state]
+(defn set-internal-state
+  [^js/Node dom new-state]
   (if-let [!state (gobj/get dom INTERNAL-STATE-SYM)]
     (reset! !state new-state)
     (throw (ex-info "No internal state available on given DOM node" {:dom dom}))))
@@ -101,7 +106,8 @@
                                prop ref])
                     :disconnect (act [::unbind (<<ctx ::z/host)])}])})
 
-(defn slotted-prop [& {:keys [selector slots]}]
+(defn slotted-prop
+  [& {:keys [selector slots]}]
   (let [slotted-selector (some-> selector z/css-selector)
         slot-selector (if slots (->> slots (map #(str "slot[name=\"" (name %) "\"]")) (str/join ",")) "slot")]
     {:state-factory
@@ -141,7 +147,8 @@
      (fn slotted-prop-state-cleanup [state _]
        (dispose! state))}))
 
-(defn internal-state-prop [initial]
+(defn internal-state-prop
+  [initial]
   {:state-factory
    (fn [^js/Node dom]
      (let [!state (atom initial)]

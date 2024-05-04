@@ -3,7 +3,7 @@
   (:require
     [zero.config :as zc]))
 
-(defonce !db (atom {}))
+(defonce ^:private !db (atom {}))
 (defonce ^:private !db-watches (atom {}))
 
 (zc/reg-streams
@@ -30,7 +30,8 @@
               :else
               nil)))))))
 
-(defn get [path]
+(defn get
+  [path]
   (get-in @!db path))
 
 (zc/reg-injections
@@ -38,10 +39,12 @@
   (fn [_ path]
     (get-in @!db path)))
 
-(defn- super-paths [path]
+(defn- super-paths
+  [path]
   (map #(subvec path 0 %) (range 0 (count path))))
 
-(defn- watched-sub-paths [path]
+(defn- watched-sub-paths
+  [path]
   (letfn [(collect-all-sub-paths [cur-path watch-node]
             (cons
               cur-path
@@ -54,12 +57,14 @@
         @!db-watches
         (get-in (:sub @!db-watches) (interpose :sub path))))))
 
-(defn- paths-affected-by-change-to [path]
+(defn- paths-affected-by-change-to
+  [path]
   (concat
     (super-paths path)
     (watched-sub-paths path)))
 
-(defn apply-patch [m patch]
+(defn apply-patch
+  [m patch]
   (reduce
     (fn [[m-agg affected-paths-agg] {:keys [path fnil] :as patch-entry}]
       (let [path (vec path)
@@ -158,7 +163,8 @@
     [m #{}]
     patch))
 
-(defn patch! [patch]
+(defn patch!
+  [patch]
   (let [[new-db affected-paths] (apply-patch @!db patch)]
     (reset! !db new-db)
     (doseq [path affected-paths

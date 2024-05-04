@@ -2,9 +2,7 @@
   (:require
    [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
    [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
-   [zero.impl.injection #?@(:cljs [:refer [Injection]])]
-   [zero.impl.base #?@(:cljs [:refer [IDisposable dispose!]])]
-   [zero.logger :as log]
+   [zero.impl.injection #?@(:cljs [:refer [Injection]])] 
    [zero.impl.markup :as markup]
    [zero.config :as config]
    [clojure.string :as str])
@@ -55,28 +53,14 @@ In a ClojureScript context, and when dispatching with an event, the action dispa
 with `setTimeout` rather than invoked directly.  This improves consistency between throttled vs non-throttled
 dispatches; the event will always be stale.  Use `:immediate` dispatch to have the action dispatch immediately
 when called.
-" [& things]
+" {:arglists
+   '[[& effects]
+     [{:keys [log? prevent-default? stop-propagation? dispatch delta]} & effects]]}
+  [& things]
   (let [[props effects] (if (map? (first things))
                           [(first things) (rest things)]
                           [{} things])]
     (Action. props (filterv some? effects))))
-
-(def ^:deprecated reg-effect "
-Register one or more effects.
-
-```clojure
-(reg-effect
- ::echo
- (fn [& args]
-   (prn args))
-
- ::echo2
- (fn [& args]
-  (prn args)))
-
-(act ::echo \"Hello, World!\")
-```
-" config/reg-effects)
 
 (defn bnd "
 Construct a binding.
@@ -93,38 +77,17 @@ are `IWatchable` and have value semantics.  When watching an instance of a
 binding, what's really being watched is the underlying data stream; so any
 instance is fine to add and remove watches, particular instances don't need
 to be held on to.
-" [& things]
+" {:arglists
+   '[[stream-key & args]
+     [{:keys [default default-nil?]} stream-key & args]]}
+  [& things]
   (let [[props stream-key args] (if (map? (first things))
                                   [(first things) (second things) (nthrest things 2)]
                                   [{} (first things) (rest things)])]
     (Binding. props stream-key (vec args))))
 
-(def ^:deprecated reg-stream "
-Register one or more data streams.
-
-```clojure
-(defonce !db (atom {}))
-
-(reg-stream
- :db
- (fn [rx path]
-  (rx (get-in @!db path)))
-
- :other
- (fn [rx]
-  (rx \"thing\")))
-```
-
-If a function is returned it will be called to cleanup
-the stream once it's spun down.
-
-Each pair of `[stream-key args]` represents a unique
-stream instance, so the method will be called only once
-for each set of args used with the stream; until the
-stream has been spun down and must be restarted.
-" config/reg-streams)
-
-(defn << "
+(def ^{:arglists '[[injection-key & args]]}
+  << "
 Creates an injection.  These can be placed in actions, bindings,
 and markup; and nested in other injectors. Injectors will be substituted
 by the value returned by the registered injection handler.
@@ -141,9 +104,14 @@ As a convenience, injectors can be chained without nesting:
 ;; is equivalent to
 (<< :inject-something 1 2 (<< :inject-something-else))
 ```
-" [injection-key & things]
-  (let [[args others] (split-with (partial not= <<) things)]
-    (Injection. injection-key (cond-> (vec args) (seq others) (conj (apply << (rest others)))))))
+"
+  (with-meta
+    (fn << [injection-key & args]
+      (let [[args others] (split-with #(-> % meta ::injector-fn not) args)]
+        (Injection. injection-key
+          (cond-> (vec args)
+            (seq others) (conj (apply (first others) (rest others)))))))
+    {::injector-fn true}))
 
 (defn element-name "
 Given a keyword, returns the custom element name that'll be generated
@@ -187,7 +155,8 @@ for a component with this name.
   [m]
   (Binding. (into {} (:props m)) (:key m) (vec (:args m))))
 
-(defn css-selector [x]
+(defn css-selector
+  [x]
   (cond
     (string? x)
     x
@@ -200,14 +169,28 @@ for a component with this name.
     (vector? x)
     (str/join " " (map css-selector x))))
 
-(defn <<act [& args]
-  (apply << ::act args))
+(def ^{:arglists
+       '[[& effects]
+         [{:keys [log? prevent-default? stop-propagation? dispatch delta]} & effects]]}
+  <<act
+  (with-meta
+    (fn <<act [& args]
+      (apply << ::act args))
+    {::injector-fn true}))
 
-(defn <<ctx [& path]
-  (apply << ::ctx path))
+(def ^{:arglists '[[& path]]}
+  <<ctx 
+  (with-meta
+    (fn <<ctx [& path]
+      (apply << ::ctx path))
+    {::injector-fn true}))
 
-(defn <<< [& args]
-  (apply << ::<< args))
+(def ^{:arglists '[[& args]]}
+  <<< 
+  (with-meta
+    (fn <<< [& args]
+      (apply << ::<< args))
+    {::injector-fn true}))
 
 (config/reg-effects
   ::choose

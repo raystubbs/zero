@@ -1,7 +1,6 @@
-(ns zero.impl.markup
+(ns ^:no-doc zero.impl.markup
   (:require
-   [clojure.string :as str]
-   [zero.impl.base :refer [can-watch?]]))
+   [clojure.string :as str]))
 
 (defn flatten-body [body]
   (mapcat

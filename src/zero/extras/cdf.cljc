@@ -17,14 +17,16 @@
 (def ^:private CTRL-CHAR-RANGE-START 0x00)
 (def ^:private CTRL-CHAR-RANGE-END 0x0f)
 
-(defn graphical-char? [c]
+(defn- graphical-char?
+  [c]
   ;; TODO: improve
   (let [x (char-code c)]
     (and
       (not (<= CTRL-CHAR-RANGE-START x CTRL-CHAR-RANGE-END))
       (not= 0x7F x))))
 
-(defn parse-number [s start-index _opts]
+(defn- parse-number
+  [s start-index _opts]
   (let [w (str-writer)]
     (loop [i start-index
            stage :integer]
@@ -79,7 +81,8 @@
 
             (throw (ex-info "unexpected character" {:idx i :char c}))))))))
 
-(defn parse-keyword [s start-index _opts]
+(defn- parse-keyword
+  [s start-index _opts]
   (let [w (str-writer)]
     (loop [i (inc start-index)]
       (if (= i (count s))
@@ -97,13 +100,15 @@
               (write w c)
               (recur (inc i)))))))))
 
-(defn count-quotes [s start-index]
+(defn- count-quotes
+  [s start-index]
   (loop [i start-index]
     (if (or (= i (count s)) (not= (nth s i) \`))
       (- i start-index)
       (recur (inc i)))))
 
-(defn parse-string [s start-index _opts]
+(defn- parse-string
+  [s start-index _opts]
   (let [opening-qcount (count-quotes s start-index)
         content-start-index (+ start-index opening-qcount)
 
@@ -118,7 +123,8 @@
               (write w c)
               (recur (inc i)))))))))
 
-(defn parse-ident [s start-index _opts]
+(defn- parse-ident
+  [s start-index _opts]
   (let [w (str-writer)]
     (loop [i start-index]
       (if (= i (count s))
@@ -134,9 +140,14 @@
                 (recur (inc i)))
               (throw (ex-info "unexpected character" {:idx i})))))))))
 
-(declare parse-op parse-seq parse-map)
+(declare
+  ^:private parse-op
+  ^:private parse-seq
+  ^:private parse-map
+  ^:private write-val)
 
-(defn parse-body [s start-index terminator-char opts]
+(defn- parse-body
+  [s start-index terminator-char opts]
   (let [items (mut-list)]
     (loop [i start-index]
       (if (= i (count s))
@@ -183,7 +194,8 @@
                 (append! items v)
                 (recur end-index)))))))))
 
-(defn parse-op [s start-index opts]
+(defn- parse-op
+  [s start-index opts]
   (let [[op-str body-start-index] (parse-ident s (inc start-index) opts)
         _ (when (= "" op-str) (throw (ex-info "missing operator" {:idx start-index})))
         op-sym (symbol op-str)
@@ -192,23 +204,26 @@
         [body end-index] (parse-body s body-start-index \) opts)]
     [(apply op-fn body) end-index]))
 
-(defn parse-seq [s start-index opts]
+(defn- parse-seq
+  [s start-index opts]
   (let [[body end-index] (parse-body s (inc start-index) \] opts)]
     [body end-index]))
 
-(defn parse-map [s start-index opts]
+(defn- parse-map
+  [s start-index opts]
   (let [[body end-index] (parse-body s (inc start-index) \} opts)]
     (when-not (even? (count body))
       (throw (ex-info "map has odd number of items" {:idx start-index})))
     [(apply array-map body) end-index]))
 
-(def default-operators
+(def ^:private default-operators
   {'act z/act
    'bnd z/bnd
    '<<  z/<<
    'set (fn [& xs] (set xs))})
 
-(defn read-str [s & {:as opts}]
+(defn- read-str
+  [s & {:as opts}]
   (let [opts (merge {:operators default-operators} opts)]
     (case s
       "" ""
@@ -240,9 +255,8 @@
           (throw (ex-info "extra characters at end of string" {:idx end-index}))
           v)))))
 
-(declare write-val)
-
-(defn default-mapper [x]
+(defn- default-mapper
+  [x]
   (cond
     (set? x)
     (cons 'set (seq x))
@@ -262,7 +276,8 @@
     :else
     x))
 
-(defn- max-quotes-count [s]
+(defn- max-quotes-count
+  [s]
   (loop [i 0
          cur-max 0]
     (if-let [qi (str/index-of s \` i)]
@@ -270,7 +285,8 @@
         (recur (+ qi qcount) (max cur-max qcount)))
       cur-max)))
 
-(defn- write-map [w x opts]
+(defn- write-map
+  [w x opts]
   (write w \{)
   (when-let [[first-k first-v] (first x)]
     (write-val w first-k opts)
@@ -283,7 +299,8 @@
       (write-val w v opts)))
   (write w \}))
 
-(defn- write-seq [w x opts]
+(defn- write-seq
+  [w x opts]
   (write w \[)
   (when (seq x)
     (let [first-v (first x)]
@@ -293,7 +310,8 @@
       (write-val w v opts)))
   (write w \]))
 
-(defn- write-op [w x opts]
+(defn- write-op
+  [w x opts]
   (write w \()
   (write w (pr-str (first x)))
   (doseq [v (rest x)]
@@ -301,7 +319,8 @@
     (write-val w v opts))
   (write w \)))
 
-(defn- write-val [w x {:keys [top?] :as opts}]
+(defn- write-val
+  [w x {:keys [top?] :as opts}]
   (let [x ((:mapper opts) x)
         nested-opts (assoc opts :top? false)]
     (cond
@@ -371,6 +390,7 @@
       (throw (ex-info "don't know how to write value" {:value x})))
     (str-writer->str w)))
 
-(defn write-str [x & {:as opts}]
+(defn write-str
+  [x & {:as opts}]
   (let [w (str-writer)]
     (write-val w x (merge {:mapper default-mapper :top? true} opts))))

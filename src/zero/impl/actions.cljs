@@ -1,4 +1,4 @@
-(ns zero.impl.actions
+(ns ^:no-doc zero.impl.actions
   (:require
     [clojure.string :as str]
     [zero.impl.injection :refer [apply-injections]]

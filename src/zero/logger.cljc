@@ -5,7 +5,8 @@
 
 (defmulti log (fn log-dispatch [level _msg & _opts] level))
 
-(defmethod log :default [level msg {:keys [data ex file line]}]
+(defmethod log :default
+  [level msg {:keys [data ex file line]}]
   #?(:cljs (let [log-fn (case level
                           :error (.bind js/console.error js/console)
                           :warn (.bind js/console.warn js/console)

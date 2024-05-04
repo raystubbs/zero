@@ -1,12 +1,10 @@
 (ns zero.extras.util
-  (:require
-   [clojure.string :as str]
-   [zero.config :as zc]
-   [zero.core :as z]
+  (:require 
    [zero.impl.base :refer [try-catch try-deref]]
    [zero.logger :as log]))
 
-(defn derived [f & deps]
+(defn derived
+  [f & deps]
   (fn [rx & args]
     (let [watch-id (random-uuid)
           !dep-vals (atom nil)
@@ -29,16 +27,18 @@
         (doseq [dep deps]
           (remove-watch dep watch-id))))))
 
-(defonce !watch-deps (atom {}))
+(defonce ^:private !watch-deps (atom {}))
 
-(defn unwatch [key]
+(defn unwatch
+  [key]
   (when-let [deps (get @!watch-deps key)]
     (doseq [dep deps]
       (remove-watch dep [::watch key])))
   (swap! !watch-deps dissoc key)
   nil)
 
-(defn watch [key f & deps]
+(defn watch
+  [key f & deps]
   (unwatch key)
   (swap! !watch-deps assoc key deps)
   (let [!dep-vals (atom nil)
@@ -57,7 +57,8 @@
         (on-deps new-val))))
   nil)
 
-(defn when-all [k f & deps]
+(defn when-all
+  [k f & deps]
   (let [init-dep-vals (map try-deref deps)]
     (if (every? some? init-dep-vals)
       (apply f init-dep-vals)
@@ -70,7 +71,8 @@
         deps)))
   nil)
 
-(defn when-any [k f & deps]
+(defn when-any
+  [k f & deps]
   (let [init-dep-vals (map try-deref deps)]
     (if (some some? init-dep-vals)
       (apply f init-dep-vals)
