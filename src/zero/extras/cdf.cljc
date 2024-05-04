@@ -222,7 +222,7 @@
    '<<  z/<<
    'set (fn [& xs] (set xs))})
 
-(defn- read-str
+(defn read-str
   [s & {:as opts}]
   (let [opts (merge {:operators default-operators} opts)]
     (case s
