@@ -1,6 +1,7 @@
 
 [![Clojars Project](https://img.shields.io/clojars/v/me.raystubbs/zero.svg)](https://clojars.org/me.raystubbs/zero)
 ![Test Badge](https://github.com/raystubbs/zero/actions/workflows/ci.yml/badge.svg)
+[![cljdoc badge](https://cljdoc.org/badge/me.raystubbs/zero)](https://cljdoc.org/d/me.raystubbs/zero)
 
 # Zero
 A toolkit for building web components in Clojure and ClojureScript.
