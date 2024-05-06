@@ -216,7 +216,7 @@
       (throw (ex-info "map has odd number of items" {:idx start-index})))
     [(apply array-map body) end-index]))
 
-(def ^:private default-operators
+(def default-operators
   {'act z/act
    'bnd z/bnd
    '<<  z/<<
@@ -255,7 +255,7 @@
           (throw (ex-info "extra characters at end of string" {:idx end-index}))
           v)))))
 
-(defn- default-mapper
+(defn default-mapper
   [x]
   (cond
     (set? x)
