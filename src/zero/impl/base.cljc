@@ -84,3 +84,13 @@
 
 #?(:clj (defn str-writer->str [w] (.toString w))
    :cljs (defn str-writer->str [w] (-> ^js w .-sb .toString)))
+
+(defn dissoc-in
+  [m [k & ks]]
+  (if (seq ks)
+    (let [new (dissoc-in (get m k) ks)]
+      (prn new)
+      (if (seq new)
+        (assoc m k new)
+        (dissoc m k)))
+    (dissoc m k)))

@@ -24,7 +24,7 @@
   (^:private -bnd-remove-watch [b key])
   (^:private -bnd-equiv [b other])
   (^:private -bnd-hash [b])
-  (^:private -bnd-write ^String [b]))
+  (^:private ^String -bnd-write [b]))
 
 #?(:cljs
    (deftype Binding [props stream-key args]
@@ -71,21 +71,21 @@
     (let [actual-fun (if (:default-nil? (.-props b))
                        (fn [ref key old-val new-val]
                          (f ref key old-val (if (nil? new-val) (:default (.-props b)) new-val)))
-                       f)]
-      (let [stream-ident [(.-stream-key b) (.-args b)]
-            [old _] (swap-vals! !stream-states assoc-in [stream-ident :watches [b key]] actual-fun)]
-        (when (nil? (get old stream-ident))
-          (try-catch
-            (let [stream-fn (or (get-in @config/!registry [:stream-handlers (.-stream-key b)]) (throw (ex-info "No stream registered for key" {:stream-key (.-stream-key b)})))
-                  kill-fn (apply stream-fn (rx-fn stream-ident) (apply-injections (.-args b) {}))]
-              (swap! !stream-states assoc-in [stream-ident :kill-fn] kill-fn)
-              nil)
-            (do
-              (log/error "Error booting stream"
-                :data {:stream (.-stream-key b)
-                       :args (.-args b)}
-                :ex %)
-              (swap! !stream-states dissoc stream-ident)))))))
+                       f)
+          stream-ident [(.-stream-key b) (.-args b)]
+          [old _] (swap-vals! !stream-states assoc-in [stream-ident :watches [b key]] actual-fun)] 
+      (when (nil? (get old stream-ident))
+        (try-catch
+          (let [stream-fn (or (get-in @config/!registry [:stream-handlers (.-stream-key b)]) (throw (ex-info "No stream registered for key" {:stream-key (.-stream-key b)})))
+                kill-fn (apply stream-fn (rx-fn stream-ident) (apply-injections (.-args b) {}))]
+            (swap! !stream-states assoc-in [stream-ident :kill-fn] kill-fn)
+            nil)
+          (do
+            (log/error "Error booting stream"
+              :data {:stream (.-stream-key b)
+                     :args (.-args b)}
+              :ex %)
+            (swap! !stream-states dissoc stream-ident))))))
   (-bnd-remove-watch [^Binding b key]
     (let [stream-ident [(.-stream-key b) (.-args b)]
           [old new] (swap-vals! !stream-states
@@ -135,6 +135,7 @@
         (log/error "Error in stream boot fn, hot swap failed"
           :data {:stream stream-key :args args}
           :ex %)))))
+
 (add-watch config/!registry ::update-streams #(update-streams! %3 %4))
 (update-streams! {} @config/!registry)
 

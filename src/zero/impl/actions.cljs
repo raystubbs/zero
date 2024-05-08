@@ -18,7 +18,7 @@
       if(args[0] instanceof Event) {
         zero.impl.actions.invoke_with_event_BANG_(target, args[0]);
       } else {
-        zero.impl.actions._invoke(target, args[0]);
+        cljs.core._invoke(target, args[0]);
       }
     }});
   }
@@ -37,8 +37,9 @@
         (apply act
           {:zero.core/event.data data
            :zero.core/event.target (.-target ev)
-           :zero.core/event.current (.-currentTarget ev)
+           :zero.core/event.current (.-currentTarget ev) ;; deprecated
            :zero.core/event ev
+           :zero.core/current (.-currentTarget ev)
            :zero.core/host host
            :zero.core/root root}
           nil)))))

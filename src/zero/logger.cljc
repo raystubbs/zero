@@ -15,7 +15,7 @@
              (apply log-fn
                (cond-> [msg]
                  (some? data)
-                 (cond-> data (and file line) (conj [:loc (str file ":" line)]))
+                 (conj (cond-> data (and file line) (conj [:loc (str file ":" line)])))
                  
                  (some? ex)
                  (into ["\n" ex]))))

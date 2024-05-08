@@ -2,16 +2,17 @@
 Implements web components.  Require this ns to enable them.
 "
   (:require
-    [clojure.set :as set]
-    [zero.impl.base :as base]
-    [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
-    [zero.impl.injection :refer [apply-injections]]
-    [zero.impl.dom :as dom]
-    [zero.config :as config]
-    [clojure.string :as str]
-    [goog.object :as gobj]
-    [goog :refer [DEBUG]]
-    [zero.logger :as log]))
+   [clojure.set :as set]
+   [zero.impl.base :as base]
+   [zero.impl.markup :refer [preproc-vnode clj->css-property kw->el-name]]
+   [zero.impl.injection :refer [apply-injections]]
+   [zero.impl.signals :refer [Signal] :as sig]
+   [zero.impl.dom :as dom]
+   [zero.config :as config]
+   [clojure.string :as str]
+   [goog.object :as gobj]
+   [goog :refer [DEBUG]]
+   [zero.logger :as log]))
 
 (defn- css
   [s]
@@ -70,6 +71,22 @@ Implements web components.  Require this ns to enable them.
 (defonce ^:private internals-fields-index
   (dom/class->fields-index js/ElementInternals))
 
+(defn patch-listeners [^js/Node dom ^js/ShadowRoot root listener-diff-map] 
+  (doseq [[k [old-val new-val]] listener-diff-map]
+    (when (some? old-val)
+      (let [old-listen-key [old-val dom k]]
+        (if (instance? Signal k)
+          (sig/unlisten k old-listen-key)
+          (dom/unlisten old-listen-key))))
+    (when (some? new-val)
+      (let [new-listen-key [new-val dom k]]
+        (if (instance? Signal k)
+          (sig/listen k new-listen-key new-val
+            {:zero.core/host (.-host root)
+             :zero.core/root root
+             :zero.core/current dom})
+          (dom/listen [new-val dom k] dom k new-val))))))
+
 (defn- patch-root-props
   [^js/ShadowRoot dom ^js/ElementInternals internals ^js class props]
   (let [old-props (gobj/get dom dom/PROPS-SYM)
@@ -90,11 +107,7 @@ Implements web components.  Require this ns to enable them.
         (set! (.-adoptedStyleSheets dom) (->> (conj css-prop host-css) (mapv dom/->stylesheet-object) to-array)))
 
       ;; patch listeners
-      (doseq [[k [old-val new-val]] (diff :zero.core/on)]
-        (when (some? old-val)
-          (dom/unlisten [old-val dom k]))
-        (when (some? new-val)
-          (dom/listen [new-val dom k] dom k new-val)))
+      (patch-listeners dom dom (diff :zero.core/on))
 
       ;; patch internals
       (doseq [[k [_ new-val]] (diff :zero.core/internals)]
@@ -129,7 +142,7 @@ Implements web components.  Require this ns to enable them.
     (gobj/set dom dom/PROPS-SYM props)))
 
 (defn- patch-props
-  [^js/Node dom props]
+  [^js/Node dom ^js/ShadowRoot root props]
   (let [diff (diff-props (or (gobj/get dom dom/PROPS-SYM) {}) props)]
     (when-not (empty? diff)
       (let [fields-index (-> dom .-constructor dom/class->fields-index)
@@ -140,11 +153,7 @@ Implements web components.  Require this ns to enable them.
           (dom/set-prop fields-index dom k new-val))
 
         ;; patch listeners
-        (doseq [[k [old-val new-val]] (diff :zero.core/on)]
-          (when (some? old-val)
-            (dom/unlisten [old-val dom k]))
-          (when (some? new-val)
-            (dom/listen [new-val dom k] dom k new-val)))
+        (patch-listeners dom root (diff :zero.core/on))
 
         ;; patch binds
         (doseq [[k [old-val new-val]] (diff :zero.core/bind)]
@@ -298,7 +307,7 @@ Implements web components.  Require this ns to enable them.
                                         config/disable-tags?
                                         (nil? (:zero.core/tag props))
                                         (not= (:zero.core/tag props) (:zero.core/tag old-props)))
-                                  (patch-props child-dom props)
+                                  (patch-props child-dom (:shadow @!instance-state) props)
                                   (when-not (:zero.core/opaque? props)
                                     (patch-children child-dom !instance-state body)))
                                 [child-dom])

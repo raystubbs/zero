@@ -3,7 +3,8 @@
    [zero.core :as z]
    [zero.dom :as dom]
    [zero.config :as zc]
-   [zero.component]))
+   [zero.component]
+   [zero.logger :as log]))
 
 (defn do-steps [zero-element & step-fns]
   (if (empty? step-fns)
@@ -107,7 +108,7 @@
       (fn [^js/HTMLElement el]
         (assert (= "FOO" (-> el .-shadowRoot .-firstChild .-innerText))))))
   
-  (js/it "listens"
+  (js/it "listens for events"
     (let [!invoked? (atom false)]
       (step-test
         #(create-element ::dom/echo)
@@ -119,4 +120,22 @@
         (fn [^js/HTMLElement el] 
           (-> el .-shadowRoot .-firstChild .click))
         (fn [^js/HTMLElement _el]
-          (assert (= true @!invoked?)))))))
+          (assert (= true @!invoked?))))))
+  
+  (js/it "listens for signals and receives correct context"
+    (let [!signal-context (atom nil)
+          my-signal (z/sig ::my-signal)]
+      (step-test
+        #(create-element ::dom/echo)
+        (fn [^js/HTMLElement el]
+          (set! (.-vdom el)
+            [:root>
+             [:button
+              ::z/on {my-signal #(reset! !signal-context %)}]]))
+        (fn [^js/HTMLElement _el]
+          (my-signal))
+        (fn [^js/HTMLElement el]
+          (prn @!signal-context)
+          (assert (= el (::z/host @!signal-context)))
+          (assert (= (.-shadowRoot el) (::z/root @!signal-context)))
+          (assert (= (-> el .-shadowRoot .-firstChild) (::z/current @!signal-context))))))))

@@ -57,7 +57,7 @@ be enabled/loaded.  To enable components in your project, the `zero.component`
 namespace must be loaded.
     
 
-## 2 State Management
+## 2. State Management
 In addition to Zero’s main goal of providing a convenient interface to build web components, the library also provides a few primitives for overall state management.  These utilities are flexible enough to be useful regardless of your project type: static site, SSR, SPA, etc.  However, they aren’t essential, and you can instead opt to prefer the browser’s native state management mechanisms (i.e. raw event listeners and manual property updates).
 
 > **Tip**
@@ -95,7 +95,7 @@ In ClojureScript, actions are not only callable in the Clojure sense, but also i
     
   ```clojure
   :zero.core/event
-  ;; the event itself, probably stale by now
+  ;; The event itself, probably stale by now
   :zero.core/root
   ;; `event.currentTarget.getRootNode()` immediately when the
   ;; action is called.  If the action is called as an event handler
@@ -104,12 +104,12 @@ In ClojureScript, actions are not only callable in the Clojure sense, but also i
   ;; `root.host` if `root` is a ShadowRoot, otherwise nil.  If the action
   ;; is called as an event handler in a component, this will be the DOM
   ;; node for that component.
+  :zero.core/current
+  ;; The original `event.currentTarget` as seen when the action was called.
   :zero.core/event.data
-  ;; the data harvested from the event
+  ;; The data harvested from the event.
   :zero.core/event.target
-  ;; the original `event.target` as seen when the action was called
-  :zero.core/event.current
-  ;; the original `event.currentTarget` as seen when the action was called
+  ;; The original `event.target` as seen when the action was called.
   ```
     
 - When given the `:stop-propagation? true` or `:prevent-default? true` options, the respective methods will be called on the given event *immediately* when the action is called
@@ -226,6 +226,55 @@ One challenge of working with slots from reactive `:view` functions, is trying t
 
 The `:slotted` prop value will be a set of all nodes slotted in the component.  This set can be reduced by giving `:slots #{...slot-names...}` or `:selector css-selector`. For example `(zd/slotted-prop :slots #{:my-slot} :selector :input.my-class)`.
 
+### 3.2 Signals (experimental)
+There are certain cases where we need to be able to tell a component
+about something that happened outside itself.
+
+For example here's the need that inspired this feature:
+
+> A search component (think VS Code command palette) with
+> the following:
+> - Reusable either within a dialog or elsewhere
+> - When used in a dialog, the search box should be focused when said dialog is opened
+
+This component would have no easy way of knowing if it were
+being rendered in a dialog; or when said dialog was being opened
+or closed... at least not without breaking encapsulation, and thus,
+composability.
+
+Signals are the solution to this and many similar conundrums.  They're meant to
+be passed into a component via props.  When used as a key in a listener
+map (i.e `::z/on`), the given listener will be called with an appropriate context
+map when the signal is invoked.  Here's an example:
+
+```clojure
+(zc/reg-components
+ ::inner
+ {:props
+  #{:focus-sig}
+
+  :view
+  (fn [{:keys [focus-sig]}]
+   [:input ::z/on {focus-sig #(.focus (::z/current %))}])}
+
+ ::outer
+ {:view
+  (fn []
+   (let [focus-sig (z/sig ::focus-sig)]
+    [:div
+     [::inner :focus-sig focus-sig]
+     [:button ::z/on {:click focus-sig}
+      "Click to focus the input"]]))})
+```
+
+When a signal is invoked (called), all of its listeners are invoked in turn.
+In this example:
+- The `focus-sig` signal is installed as a click event listener on the button in `::outer`.
+- The same `focus-sig` is installed as a _signal_ listener on the input in `::inner`.
+- Clicking the button triggers a click event, which causes `focus-sig` to be invoked, which
+  causes the focus listener to be invoked, focusing the input.
+
+
 ## 4. Markup
 Zero’s markup syntax is based loosely on [Hiccup](https://github.com/weavejester/hiccup), though there are significant differences.  This syntax is what must be returned from a component’s `:view` function, to be rendered to its shadow DOM.  And can be passed to `zero.html/html` to be rendered as a raw HTML string.
 
@@ -269,6 +318,7 @@ When rendering markup from the component’s `:view` function, a `:root>` form c
     - `render` — Each time the element is rendered (i.e. `:view` is invoked and its markup applied to the DOM).
     - `update` — Each time the element is rendered except for the first.
     - `disconnect` — When the element is disconnected from the document.
+
 - `:zero.core/style`
     
     Similar to the counterpart on normal element forms detailed below, except the style is applied as a default to the component itself.  This is done by rendering the style map to a `:host { ... }` rule within a `CSSStyleSheet`, and attaching result as the ShadowRoot’s first `adoptedStyleSheet`.
@@ -291,7 +341,8 @@ The following props have special significance in Zero markup when given on eleme
 
 - `:zero.core/on`
 
-  When rendering as a component’s markup (i.e. from a `:view` function) this registers event listeners for the element.  It should be a map of `event-name-keyword -> handler-fn`. 
+  When rendering as a component’s markup (i.e. from a `:view` function) this registers event or signal listeners for
+  the element.  It should be a map of `event-name-keyword-or-signal -> handler-fn`. 
   
   When rendering as HTML via `zero.html/html`, however, something else happens:
   

@@ -3,6 +3,7 @@
    [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
    [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
    [zero.impl.injection #?@(:cljs [:refer [Injection]])] 
+   [zero.impl.signals #?@(:cljs [:refer [Signal]])]
    [zero.impl.markup :as markup]
    [zero.config :as config]
    [clojure.string :as str])
@@ -10,7 +11,8 @@
      (:import
       (zero.impl.actions Action)
       (zero.impl.bindings Binding)
-      (zero.impl.injection Injection))))
+      (zero.impl.injection Injection)
+      (zero.impl.signals Signal))))
 
 (defn act "
 Construct an action.
@@ -113,6 +115,28 @@ As a convenience, injectors can be chained without nesting:
             (seq others) (conj (apply (first others) (rest others)))))))
     {::injector-fn true}))
 
+(defn sig "
+Create a signal.  For when a component needs to know about
+external happenstance.
+
+    (def my-sig (sig ::my-signal-key))
+    
+    ;; elsewhere
+    [::some-component :focus-signal my-sig]
+
+    ;; elsewhere
+    (zc/reg-components
+     ::some-component
+     {:props #{:focus-signal}
+      :view (fn [{:keys [focus-signal]}]
+             [:input
+              ::z/on {focus-signal (act [::focus (<<ctx ::z/current)])}])})
+
+    ;; elsewhere
+    (my-sig)
+" [k]
+  (Signal. k))
+
 (defn element-name "
 Given a keyword, returns the custom element name that'll be generated
 for a component with this name.
@@ -154,6 +178,18 @@ for a component with this name.
 (defn map->bnd
   [m]
   (Binding. (into {} (:props m)) (:key m) (vec (:args m))))
+
+(defn sig?
+  [x]
+  (instance? Signal x))
+
+(defn sig->map
+  [^Signal x]
+  {:key (.-key x)})
+
+(defn map->sig
+  [m]
+  (Signal. (:key m)))
 
 (defn css-selector
   [x]

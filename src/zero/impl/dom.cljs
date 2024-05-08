@@ -117,11 +117,20 @@
 (defonce !binds (atom {}))
 (defonce !bound-props (atom #{}))
 
+(defn unbind [k]
+  (if-let [{:keys [watchable prop-name ^js/Node dom]} (get @!binds k)]
+    (do
+      (remove-watch watchable [::bind k])
+      (swap! !binds dissoc k)
+      (swap! !bound-props disj [dom prop-name]))
+    (throw (ex-info "Bind key doesn't exist" {:key k}))))
+
 (defn bind [k ^js/Node dom prop-name watchable]
-  (when (contains? @!binds k)
-    (throw (ex-info "Bind key already exists" {:key k})))
   (when (contains? @!bound-props [dom prop-name])
     (throw (ex-info "Property already bound" {:dom dom :prop-name prop-name})))
+  
+  (when (contains? @!binds k)
+    (unbind k))
 
   (let [fields-index (-> dom .-constructor class->fields-index)]
     (add-watch watchable [::bind k]
@@ -134,14 +143,6 @@
     (let [current (when (satisfies? IDeref watchable) @watchable)]
       (set-prop fields-index dom prop-name current))))
 
-(defn unbind [k]
-  (if-let [{:keys [watchable prop-name ^js/Node dom]} (get @!binds k)]
-    (do
-      (remove-watch watchable [::bind k])
-      (swap! !binds dissoc k)
-      (swap! !bound-props disj [dom prop-name]))
-    (throw (ex-info "Bind key doesn't exist" {:key k}))))
-
 (defonce !listener-aborters (atom {}))
 
 (defn on-css-link-created! [^js/HTMLLinkElement link-dom]
@@ -151,14 +152,20 @@
 (defn on-css-link-removed! [^js/HTMLLinkElement link-dom]
   (swap! !css-links disj link-dom))
 
-(defn listen [k ^js/Node dom-or-doms event-name listener-fn & {:keys [once? capture? passive? signal]}]
+(defn unlisten [k]
+  (if-let [aborter ^js/AbortController (get @!listener-aborters k)]
+    (.abort aborter)
+    (throw (ex-info "Listener key doesn't exist" {:key k}))))
+
+(defn listen [k ^js targets event-name listener-fn & {:keys [once? capture? passive? signal]}]
   (when (contains? @!listener-aborters k)
-    (throw (ex-info "Listener key already exists" {:key k})))
+    (unlisten k))
+  
   (let [aborter (js/AbortController.)]
     (when (some? signal)
       (.addEventListener signal "abort" (fn [_] (.abort aborter))
         #js{:once true :signal (.-signal aborter)}))
-    (doseq [dom (cond-> dom-or-doms (not (or (coll? dom-or-doms) (instance? js/NodeList dom-or-doms))) vector)]
+    (doseq [dom (cond-> targets (not (or (coll? targets) (instance? js/NodeList targets))) vector)]
       (.addEventListener dom (name event-name)
         (if once? #(do (.abort aborter) (listener-fn %)) listener-fn)
         #js{:once once? :capture capture? :passive passive? :signal (.-signal aborter)}))
@@ -166,11 +173,6 @@
     (.addEventListener (.-signal aborter) "abort"
       (fn []
         (swap! !listener-aborters dissoc k)))))
-
-(defn unlisten [k]
-  (if-let [aborter ^js/AbortController (get @!listener-aborters k)]
-    (.abort aborter)
-    (throw (ex-info "Listener key doesn't exist" {:key k}))))
 
 (defn enable-live-reload []
   (letfn
