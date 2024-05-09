@@ -23,6 +23,7 @@ Implements web components.  Require this ns to enable them.
 (defonce ^:private HOST-CSS-SYM (js/Symbol "zHostCss"))
 (def ^:private DEFAULT-CSS (css ":host { display: contents; }"))
 (def ^:private JS-UNDEFINED (js* "undefined"))
+(def ^:private RENDER-ORDER-SYM (js/Symbol "zRenderOrder"))
 
 (defn- default-ns
   [tag]
@@ -418,7 +419,8 @@ Implements web components.  Require this ns to enable them.
   (while (seq @!dirty)
     (let [batch @!dirty]
       (reset! !dirty #{})
-      (doseq [^js/Node dom batch]
+      (doseq [^js/Node dom (sort-by #(gobj/get % RENDER-ORDER-SYM) batch)
+              :when (.-isConnected dom)]
         (let [!static-state (-> dom .-constructor (gobj/get dom/PRIVATE-SYM))
               !instance-state (gobj/get dom dom/PRIVATE-SYM)
               ^js/ShadowDom shadow (:shadow @!instance-state)
@@ -615,6 +617,8 @@ Implements web components.  Require this ns to enable them.
       (init-props instance)
       (request-render instance))))
 
+(defonce !render-order-seq (atom 0))
+
 (defn- update-component [component-name {:keys [props view focus] :as things}]
   (let [el-name (kw->el-name component-name)]
     (if-let [existing (js/customElements.get el-name)]
@@ -640,6 +644,7 @@ Implements web components.  Require this ns to enable them.
                                          :lifecycle-event-listener-counts {}
                                          :doms-on-focus-path #{}})]
                   (gobj/set this dom/PRIVATE-SYM !instance-state)
+                  (gobj/set this RENDER-ORDER-SYM (swap! !render-order-seq inc))
                   (.addEventListener shadow "focusin"
                     (fn [^js/FocusEvent event]
                       (let [event-path (.composedPath event)

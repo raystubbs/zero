@@ -1,7 +1,8 @@
-(ns zero.clj.core-test
+(ns zero.cljc.core-test
   (:require
    [zero.core :refer [<< <<act <<ctx <<<] :as z]
-   [clojure.test :refer [deftest is]]))
+   #?(:clj [clojure.test :refer [deftest is]]
+      :cljs [cljs.test :refer-macros [deftest is]])))
 
 (deftest injector-construction
   (let [inj (<< ::k1 ::arg1 ::arg2 << ::k2 ::arg3)

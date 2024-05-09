@@ -1,10 +1,11 @@
-(ns zero.clj.html-test
+(ns zero.cljc.html-test
   (:require
-   [clojure.string :as str]
-   [clojure.test :refer [deftest is]]
-   [zero.html :as html]
-   [zero.core :as-alias z]
-   [zero.config :as zc]))
+    [clojure.string :as str]
+    [zero.html :as html]
+    [zero.core :as-alias z]
+    [zero.config :as zc]
+    #?(:clj [clojure.test :refer [deftest is]]
+       :cljs [cljs.test :refer-macros [deftest is]])))
 
 (deftest simple-rendering
   (is

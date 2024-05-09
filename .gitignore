@@ -11,4 +11,4 @@ node_modules
 .idea
 pom.xml
 *.pom.asc
-target/*
+target/
