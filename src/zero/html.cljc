@@ -175,7 +175,7 @@ Write Zero markup to a writer as HTML.
 "
   {:arglists
    '[[w & markup]
-     [w & {:keys [doctype]} & markup]]}
+     [w {:keys [doctype]} & markup]]}
   [w & args]
   (let [[opts markup] (if (map? (first args)) [(first args) (rest args)] [{} args])]
     (when-let [doctype (:doctype opts)]

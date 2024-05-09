@@ -72,7 +72,7 @@ Implements web components.  Require this ns to enable them.
 (defonce ^:private internals-fields-index
   (dom/class->fields-index js/ElementInternals))
 
-(defn patch-listeners [^js/Node dom ^js/ShadowRoot root listener-diff-map] 
+(defn- patch-listeners [^js/Node dom ^js/ShadowRoot root listener-diff-map] 
   (doseq [[k [old-val new-val]] listener-diff-map]
     (when (some? old-val)
       (let [old-listen-key [old-val dom k]]
@@ -617,7 +617,7 @@ Implements web components.  Require this ns to enable them.
       (init-props instance)
       (request-render instance))))
 
-(defonce !render-order-seq (atom 0))
+(defonce ^:private !render-order-seq (atom 0))
 
 (defn- update-component [component-name {:keys [props view focus] :as things}]
   (let [el-name (kw->el-name component-name)]
