@@ -193,6 +193,11 @@ Implements web components.  Require this ns to enable them.
     (doseq [[k watchable] (:zero.core/bind props)]
       (when (some? watchable)
         (dom/unbind [watchable dom k])))
+    (doseq [[k listener] (:zero.core/on props)]
+      (when (some? listener)
+        (if (instance? Signal k)
+          (sig/unlisten k [listener dom k])
+          (dom/unlisten [listener dom k]))))
     (gobj/set dom dom/PROPS-SYM (dissoc props :zero.core/bind)))
   (doseq [child-dom (-> dom .-childNodes array-seq)]
     (prepare-dom-to-be-detached child-dom !instance-state))

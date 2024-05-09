@@ -47,5 +47,5 @@
 
 (defn unlisten
   [sig k]
-  (swap! !listeners dissoc-in [(.-key sig) k])
+  (swap! !listeners dissoc-in [(.-key sig) k]) 
   nil)

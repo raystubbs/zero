@@ -106,7 +106,12 @@
         (assert (= "FOO" (-> el .-shadowRoot .-firstChild .-innerText)))
         (reset! !atom "ZZZ"))
       (fn [^js/HTMLElement el]
-        (assert (= "FOO" (-> el .-shadowRoot .-firstChild .-innerText))))))
+        (assert (= "FOO" (-> el .-shadowRoot .-firstChild .-innerText))))
+      (fn [^js/HTMLElement el]
+        (set! (.-vdom el) [:div]))
+      (fn [_]
+        (assert (empty? @@(resolve 'zero.impl.dom/!binds)))
+        (assert (empty? @@(resolve 'zero.impl.dom/!bound-props))))))
   
   (js/it "listens for events"
     (let [!invoked? (atom false)]
@@ -119,8 +124,12 @@
               ::z/on {:click #(reset! !invoked? true)}]]))
         (fn [^js/HTMLElement el] 
           (-> el .-shadowRoot .-firstChild .click))
-        (fn [^js/HTMLElement _el]
-          (assert (= true @!invoked?))))))
+        (fn [_]
+          (assert (= true @!invoked?)))
+        (fn [^js/HTMLElement el]
+          (set! (.-vdom el) [:div]))
+        (fn [_]
+          (assert (empty? @@(resolve 'zero.impl.dom/!listener-aborters)))))))
   
   (js/it "listens for signals and receives correct context"
     (let [!signal-context (atom nil)
@@ -132,10 +141,13 @@
             [:root>
              [:button
               ::z/on {my-signal #(reset! !signal-context %)}]]))
-        (fn [^js/HTMLElement _el]
+        (fn [_]
           (my-signal))
         (fn [^js/HTMLElement el]
-          (prn @!signal-context)
           (assert (= el (::z/host @!signal-context)))
           (assert (= (.-shadowRoot el) (::z/root @!signal-context)))
-          (assert (= (-> el .-shadowRoot .-firstChild) (::z/current @!signal-context))))))))
+          (assert (= (-> el .-shadowRoot .-firstChild) (::z/current @!signal-context))))
+        (fn [^js/HTMLElement el]
+          (set! (.-vdom el) [:div]))
+        (fn [_]
+          (assert (empty? @@(resolve 'zero.impl.signals/!listeners))))))))
