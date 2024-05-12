@@ -1,0 +1,14 @@
+{:deps {org.clojure/clojure {:mvn/version "1.11.1"}
+        ring/ring-core {:mvn/version "1.12.1"}
+        ring/ring-jetty-adapter {:mvn/version "1.12.1"}
+        ring/ring-defaults {:mvn/version "0.5.0"}
+        metosin/reitit {:mvn/version "0.7.0"}
+        me.raystubbs/zero {:local/root "./../../"}}
+
+ :paths ["resources" "src" "target/assets" "public"]
+ :aliases {:dev {:exec-fn dev/go!
+                 :extra-paths ["dev"]
+                 :extra-deps {nrepl/nrepl {:mvn/version "1.1.1"}
+                              thheller/shadow-cljs {:mvn/version "2.28.6"}}}
+           :server {:exec-fn zero-to-one.server/run-server
+                    :exec-args {:port 8000}}}}

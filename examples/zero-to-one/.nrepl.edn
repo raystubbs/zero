@@ -1,0 +1,1 @@
+{:middleware [shadow.cljs.devtools.server.nrepl/middleware]}
