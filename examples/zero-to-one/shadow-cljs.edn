@@ -1,5 +1,10 @@
 ;; shadow-cljs configuration
-{:source-paths ["src" "test"]
+{:deps true
+ :aliases [:dev]
+
+ :dev-http {9000 "out/test"}
+
+ :source-paths ["src" "test"]
 
  :builds {:app {:target :browser
                 :output-dir "resources/public/js"

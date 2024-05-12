@@ -1,6 +1,6 @@
 # Zero To One
 
-Zero to One is a bare bones example.
+Zero to One is an example of how to get started with Zero.
 
 It demonstrates how to:
 
@@ -8,17 +8,22 @@ It demonstrates how to:
 2. Run a test suite
 3. Render a component
 4. Use a CSS stylesheet
+5. Server side render the components
 
 ## Getting Started
 
-Zero to One uses Shadow CLJS. To get started, run:
+To get started, run:
 
 ```
-npx shadow-cljs app test
+clj -X:dev
 ```
 
-This starts both the app and test builds.
+This will:
 
-To see the tests, open your browser to `http://localhost:9000`.
+- Start an nrepl server, with the shadow middleware for the cljs repl
+- Start the app and test shadow builds
+- Start the backend server
 
 To see the app, open your browser to `http://localhost:8000`.
+
+To see the tests, open your browser to `http://localhost:9000`.
