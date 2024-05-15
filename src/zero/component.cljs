@@ -567,6 +567,11 @@ Implements web components.  Require this ns to enable them.
                       ^js/ShadowRoot shadow (:shadow @!instance-state)]
                   (when (pos? (get-in @!instance-state [:lifecycle-event-listener-counts "disconnect"]))
                     (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false})))
+                  (doseq [[k listener] (:zero.core/on (gobj/get shadow dom/PROPS-SYM))]
+                    (when (some? listener)
+                      (if (instance? Signal k)
+                        (sig/unlisten k [listener shadow k])
+                        (dom/unlisten [listener shadow k]))))
                   (swap! !dirty disj this)
                   (swap! !static-state update :instances disj this)
                   (swap! !instance-state assoc :connected false)

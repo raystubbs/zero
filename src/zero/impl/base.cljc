@@ -89,7 +89,6 @@
   [m [k & ks]]
   (if (seq ks)
     (let [new (dissoc-in (get m k) ks)]
-      (prn new)
       (if (seq new)
         (assoc m k new)
         (dissoc m k)))
