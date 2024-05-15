@@ -198,7 +198,8 @@ Implements web components.  Require this ns to enable them.
         (if (instance? Signal k)
           (sig/unlisten k [listener dom k])
           (dom/unlisten [listener dom k]))))
-    (gobj/set dom dom/PROPS-SYM (dissoc props :zero.core/bind)))
+    (gobj/set dom dom/PROPS-SYM (dissoc props :zero.core/bind))
+    (gobj/set dom dom/PROPS-SYM (dissoc props :zero.core/on)))
   (doseq [child-dom (-> dom .-childNodes array-seq)]
     (prepare-dom-to-be-detached child-dom !instance-state))
   (when (and DEBUG (= (.-nodeName dom) "LINK"))
@@ -567,11 +568,13 @@ Implements web components.  Require this ns to enable them.
                       ^js/ShadowRoot shadow (:shadow @!instance-state)]
                   (when (pos? (get-in @!instance-state [:lifecycle-event-listener-counts "disconnect"]))
                     (.dispatchEvent shadow (js/Event. "disconnect" #js{:bubbles false})))
-                  (doseq [[k listener] (:zero.core/on (gobj/get shadow dom/PROPS-SYM))]
-                    (when (some? listener)
-                      (if (instance? Signal k)
-                        (sig/unlisten k [listener shadow k])
-                        (dom/unlisten [listener shadow k]))))
+                  (let [root-props (gobj/get shadow dom/PROPS-SYM)]
+                    (doseq [[k listener] (:zero.core/on root-props)]
+                      (when (some? listener)
+                        (if (instance? Signal k)
+                          (sig/unlisten k [listener shadow k])
+                          (dom/unlisten [listener shadow k]))))
+                    (gobj/set shadow dom/PROPS-SYM (dissoc root-props :zero.core/on)))
                   (swap! !dirty disj this)
                   (swap! !static-state update :instances disj this)
                   (swap! !instance-state assoc :connected false)
