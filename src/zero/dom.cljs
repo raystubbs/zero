@@ -4,6 +4,7 @@
    [zero.impl.base :refer [IDisposable dispose!]]
    [zero.config :as config]
    [zero.core :refer [<< <<ctx act]:as z]
+   [zero.extras.db :as db] ;; not supposed to use 'extras' in core modules, big changes coming, this is temporary
    [clojure.string :as str]
    [goog.object :as gobj]))
 
@@ -31,12 +32,19 @@
     (reset! !state new-state)
     (throw (ex-info "No internal state available on given DOM node" {:dom dom}))))
 
+(defn patch-internal-state
+  [^js/Node dom patch]
+  (if-let [!state (gobj/get dom INTERNAL-STATE-SYM)]
+    (swap! !state (comp first db/apply-patch) patch)
+    (throw (ex-info "No internal state available on given DOM node" {:dom dom}))))
+
 (config/reg-effects
   ::listen listen
   ::unlisten unlisten
   ::bind bind
   ::unbind unbind
-  ::set-internal-state set-internal-state)
+  ::set-internal-state set-internal-state
+  ::patch-internal-state patch-internal-state)
 
 (config/reg-injections
   ::select-doms

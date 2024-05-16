@@ -25,6 +25,9 @@ Implements web components.  Require this ns to enable them.
 (def ^:private JS-UNDEFINED (js* "undefined"))
 (def ^:private RENDER-ORDER-SYM (js/Symbol "zRenderOrder"))
 
+(def before-render-sig (Signal. ::before-render))
+(def after-render-sig (Signal. ::after-render))
+
 (defn- default-ns
   [tag]
   (case tag
@@ -422,6 +425,7 @@ Implements web components.  Require this ns to enable them.
 (defn- render
   []
   (reset! !render-frame-id nil)
+  (before-render-sig)
   (while (seq @!dirty)
     (let [batch @!dirty]
       (reset! !dirty #{})
@@ -472,7 +476,8 @@ Implements web components.  Require this ns to enable them.
                   (when (contains? observed-events event-type)
                     (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false})))
                   (when (contains? observed-events "render")
-                    (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false}))))))))))))
+                    (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false})))))))))))
+  (after-render-sig))
 
 (defn- request-render
   [^js/Node dom]

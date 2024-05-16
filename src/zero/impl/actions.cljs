@@ -5,6 +5,7 @@
     [goog.object :as gobj]
     [goog :refer [DEBUG]]
     [zero.config :as config]
+    [zero.impl.signals :as sig]
     [zero.logger :as log]))
 
 (defonce Action (js* "
@@ -106,7 +107,25 @@
          (actually-perform!)
 
          :default
-         (js/setTimeout actually-perform!))
+         (js/setTimeout actually-perform!)
+
+         :after-render
+         (when-let [after-render-sig (some-> (resolve 'zero.component/after-render-sig) deref)]
+           (let [k (gensym)]
+             (sig/listen after-render-sig k
+               (fn []
+                 (sig/unlisten after-render-sig k)
+                 (actually-perform!))
+               nil)))
+
+         :before-render
+         (when-let [before-render-sig (some-> (resolve 'zero.component/before-render-sig) deref)]
+           (let [k (gensym)]
+             (sig/listen before-render-sig k
+               (fn []
+                 (sig/unlisten before-render-sig k)
+                 (actually-perform!))
+               nil))))
        nil)))
 
   IEquiv
