@@ -2,7 +2,7 @@
   (:require
    [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
    [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
-   [zero.impl.injection #?@(:cljs [:refer [Injection]])] 
+   [zero.impl.injection #?@(:cljs [:refer [Injection]]) :as inj]
    [zero.impl.signals #?@(:cljs [:refer [Signal]])]
    [zero.impl.markup :as markup]
    [zero.config :as config]
@@ -248,3 +248,7 @@ for a component with this name.
   ::<<
   (fn [_ & args]
     (apply << args)))
+
+(defn inject
+  [form context]
+  (inj/apply-injections form context))

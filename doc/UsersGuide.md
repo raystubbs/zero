@@ -82,7 +82,7 @@ Injections allow for the dynamic, just-in-time access of resources accessible th
 (<< ::select-els "button") ;; injects a NodeList of all buttons
 ```
 
-Zero respects injections found within actions, bindings, component markup, and… nested within other injections.  As a convenience, injections can also be chained within the same sexpr, so `(<< ::something 1 << ::other-thing 2)` is equivalent to `(<< ::something 1 (<< ::other-thing 2))`.
+Zero respects injections found within actions, bindings, ~~component markup,~~ (no longer supported) and… nested within other injections.  As a convenience, injections can also be chained within the same sexpr, so `(<< ::something 1 << ::other-thing 2)` is equivalent to `(<< ::something 1 (<< ::other-thing 2))`.
 
 ### 2.2 Actions
 An action is a callable value expressed as an optional options map and a sequence of effect vectors.  Each effect vector consists of a keyword (referencing a registered effect handler), followed by a sequence of arguments.  When an action is invoked (’called’), the effect handler for each vector is called in sequence.  Actions are created with `zero.core/act`.
@@ -106,7 +106,7 @@ In ClojureScript, actions are not only callable in the Clojure sense, but also i
   ;; node for that component.
   :zero.core/current
   ;; The original `event.currentTarget` as seen when the action was called.
-  :zero.core/event.data
+  :zero.core/data
   ;; The data harvested from the event.
   :zero.core/event.target
   ;; The original `event.target` as seen when the action was called.

@@ -441,8 +441,7 @@ Implements web components.  Require this ns to enable them.
                        (log/error "Error in component :view function"
                          :data {:component (:name @!static-state)}
                          :ex e)
-                       nil))
-              vdom (apply-injections vdom {:zero.core/host dom :zero.core/root shadow})]
+                       nil))]
 
           ;; if it needs to be focusable, but explicit tabIndex wasn't set
           (when (and
@@ -477,7 +476,7 @@ Implements web components.  Require this ns to enable them.
                     (.dispatchEvent shadow (js/Event. event-type #js{:bubbles false})))
                   (when (contains? observed-events "render")
                     (.dispatchEvent shadow (js/Event. "render" #js{:bubbles false})))))))))))
-  (after-render-sig))
+  (js/setTimeout #(after-render-sig)))
 
 (defn- request-render
   [^js/Node dom]
