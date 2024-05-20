@@ -1,9 +1,9 @@
 {:paths ["src"]
- :deps {}
+ :deps {me.raystubbs/subzero {:local/root "../subzero"}}
 
  :aliases
  {:dev
-  {:extra-deps {org.clojure/clojure {:mvn/version "1.11.1"}
+  {:extra-deps {org.clojure/clojure {:mvn/version "1.11.3"}
                 org.clojure/clojurescript {:mvn/version "1.11.60"}}
    :extra-paths []}
   

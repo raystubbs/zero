@@ -1,110 +1,23 @@
 (ns zero.dom
   (:require
-   [zero.impl.dom :as dom]
    [zero.impl.base :refer [IDisposable dispose!]]
-   [zero.config :as config]
-   [zero.core :refer [<< <<ctx act]:as z]
+   [zero.config :as zc]
+   [zero.core :as z]
+   [zero.impl.signals :as sig]
+   [subzero.core :as sz]
+   [subzero.rstore :as rstore]
+   [subzero.plugins.web-components :as web-components]
    [clojure.string :as str]
    [goog.object :as gobj]))
 
-(defn bind
-  [k ^js/Node dom prop-name watchable]
-  (dom/bind k dom prop-name watchable))
+(defonce ^:private internal-state-sym (js/Symbol "zInternalState"))
 
-(defn unbind
-  [k]
-  (dom/unbind k))
-
-(defn listen
-  [k ^js/Node dom-or-doms event-name listener-fn & {:keys [once? capture? passive? signal] :as opts}]
-  (dom/listen k dom-or-doms event-name listener-fn opts))
-
-(defn unlisten
-  [k]
-  (dom/unlisten k))
-
-(defonce ^:private INTERNAL-STATE-SYM (js/Symbol "zInternalState"))
-
-(defn set-internal-state
-  [^js/Node dom new-state]
-  (if-let [!state (gobj/get dom INTERNAL-STATE-SYM)]
-    (reset! !state new-state)
-    (throw (ex-info "No internal state available on given DOM node" {:dom dom}))))
-
-(config/reg-effects
-  ::listen listen
-  ::unlisten unlisten
-  ::bind bind
-  ::unbind unbind
-  ::set-internal-state set-internal-state)
-
-(config/reg-injections
-  ::select-doms
-  (fn [{root ::root} selector & {:keys [^js/Node from default]}]
-    (or
-      (some-> (.querySelectorAll (or from root) (z/css-selector selector)) vec not-empty)
-      default))
-
-  ::select-dom
-  (fn [{root ::root} selector & {:keys [^js/Node from default]}]
-    (or
-      (some-> (.querySelector (or from root) (z/css-selector selector)))
-      default))
-
-  ::host-parent-dom
-  (fn [{^js/Node host ::z/host}]
-    (.-parentElement host))
-
-  ::host-root-dom
-  (fn [{^js/Node host ::z/host}]
-    (.getRootNode host)))
-
-(config/reg-components
-  ::echo
-  {:props #{:vdom}
-   :inherit-doc-css? true
-   :view (fn [{:keys [vdom]}]
-           vdom)}
-  
-  ::listen
-  {:props #{:sel :evt :act}
-   :view (fn [{:keys [sel evt] action :act :as props}]
-           (let [action (cond
-                          (string? action) (js/Function. "event" action)
-                          (fn? action) action
-                          :else (throw (ex-info "'act' is not a function" {:act action})))]
-             [:root>
-              ::z/style {:display "none"}
-              ::z/on {:connect (act
-                                 [::listen
-                                  (<<ctx ::z/host)
-                                  (<< ::select-doms sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
-                                  evt action])
-                      :update (act
-                                [::unlisten (<<ctx ::z/host)]
-                                [::listen
-                                 (<<ctx ::z/host)
-                                 (<< ::select-doms sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
-                                 evt action])
-                      :disconnect (act [::unlisten (<<ctx ::z/host)])}]))}
-
-  ::bind
-  {:props #{:sel :prop :ref}
-   :view (fn [{:keys [sel prop ref]}]
-           [:root>
-            ::z/style {:display "none"}
-            ::z/on {:connect (act
-                               [::bind
-                                (<<ctx ::z/host)
-                                (<< ::select-dom sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
-                                prop ref])
-                    :update (act
-                              [::unbind (<<ctx ::z/host)]
-                              [::bind
-                               (<<ctx ::z/host)
-                               (<< ::select-dom sel :from (<< ::host-root-dom) :default (<< ::host-parent-dom))
-                               prop ref])
-                    :disconnect (act [::unbind (<<ctx ::z/host)])}])})
+(defn- get-internal-state!
+  [^js/HTMLElement el init-new]
+  (or (gobj/get el internal-state-sym)
+    (let [!state (rstore/rstore (cond (fn? init-new) (init-new el) (map? init-new) init-new))]
+      (gobj/set el internal-state-sym !state)
+      !state)))
 
 (defn slotted-prop
   [& {:keys [selector slots]}]
@@ -115,11 +28,14 @@
        (let [shadow (.-shadowRoot dom)
              !slotted (atom nil)
              update-slotted! (fn update-slotted! []
-                               (let [now-slotted (set
-                                                   (for [slot (array-seq (.querySelectorAll shadow slot-selector))
-                                                         node (array-seq (.assignedNodes slot))
-                                                         :when (or (nil? slotted-selector) (and (instance? js/HTMLElement node) (.matches node slotted-selector)))]
-                                                     node))]
+                               (let [now-slotted
+                                     (set
+                                       (for [slot (array-seq (.querySelectorAll shadow slot-selector))
+                                             node (array-seq (.assignedNodes slot))
+                                             :when (or (nil? slotted-selector)
+                                                     (and (instance? js/HTMLElement node)
+                                                       (.matches node slotted-selector)))]
+                                         node))]
                                  (when (not= now-slotted @!slotted)
                                    (reset! !slotted now-slotted))))
              abort-controller (js/AbortController.)]
@@ -150,7 +66,164 @@
 (defn internal-state-prop
   [initial]
   {:state-factory
-   (fn [^js/Node dom]
-     (let [!state (atom initial)]
-       (gobj/set dom INTERNAL-STATE-SYM !state)
-       !state))})
+   (fn [^js/HTMLElement element]
+     (get-internal-state! element initial))})
+
+(defn ^:deprecated set-internal-state
+  [^js/HTMLElement element new-state]
+  (reset! (get-internal-state! element {}) new-state))
+
+(defn patch-internal-state!
+  [^js/HTMLElement element patch]
+  (rstore/patch! (get-internal-state! element {}) patch))
+
+(defn listen-view
+  [!db {:keys [sel evt] action :act :as props {!mut :mut} :state}]
+  (let [action
+        (cond
+          (string? action) (js/Function. "event" action)
+          (fn? action) action
+          (satisfies? web-components/IListenValue action) action
+          :else (throw (ex-info "'act' is not a function" {:act action})))]
+    [:root>
+     :#style {:display :none}
+     :#on {:render
+           (fn [^js/Event ev]
+             (let [target (.querySelector (.getRootNode (.-target ev)) (z/css-selector sel))]
+               (when-let [{:keys [old-props old-target]} @!mut]
+                 (when-not (and (= old-props props) (= old-target target))
+                   (web-components/unlisten (:evt old-props) !db old-target)))
+               (when target
+                 (web-components/listen evt !db target action)
+                 (swap! !mut assoc :old-props props :old-target target))))
+
+           :disconnect
+           (fn [_]
+             (when-let [{:keys [old-props old-target]} @!mut]
+               (web-components/unlisten (:evt old-props) !db old-target)))}]))
+
+(defn bind-view
+  [!db {:keys [sel prop ref] :as props {!mut :mut} :state}]
+  [:root>
+   :#style {:display :none}
+   :#on {:render
+         (fn [^js/Event ev]
+           (let [target (.querySelector (.getRootNode (.-target ev)) (z/css-selector sel))]
+             (when-let [{:keys [old-props old-target]} @!mut]
+               (when-not (and (= old-props props) (= old-target target))
+                 (web-components/unbind (:prop old-props) !db old-target)))
+             (when target
+               (web-components/bind prop !db target ref)
+               (swap! !mut assoc :old-props props :old-target target))))
+  
+         :disconnect
+         (fn [_]
+           (when-let [{:keys [old-props old-target]} @!mut]
+             (web-components/unbind (:prop old-props) !db old-target)))}])
+
+(defn- delayed
+  [!db delay f & args]
+  (js/Promise.
+    (fn [resolve reject]
+      (try
+        (case delay
+          :after-render
+          (let [k (gensym)
+                after-render-sig (z/sig ::z/after-render)]
+            (sig/listen !db after-render-sig k
+              (fn []
+                (sig/unlisten !db after-render-sig k)
+                (resolve (apply f args)))))
+          
+          :before-render
+          (let [k (gensym)
+                before-render-sig (z/sig ::z/before-render)]
+            (sig/listen !db before-render-sig k
+              (fn []
+                (sig/unlisten !db before-render-sig k)
+                (resolve (apply f args)))))
+          
+          (nil :none)
+          (apply f args))
+        (catch :default ex
+          (reject ex))))))
+
+(defn select-one
+  [{^js/Node root ::z/root !db ::sz/db}
+   selector
+   & {:keys [deep? delay]}]
+  (letfn [(select-fn
+            [^js/Node root]
+            (or
+              (.querySelector root (z/css-selector selector))
+              (when deep?
+                (some
+                  (fn [^js/Node node]
+                    (when-let [inner-root (.-shadowRoot node)]
+                      (select-fn inner-root)))
+                  (array-seq (.-childNodes root))))))]
+    (delayed !db delay select-fn root)))
+
+(defn select-all
+  [{^js/Node root ::z/root !db ::sz/db}
+   selector
+   & {:keys [deep? delay]}]
+  (letfn [(select-fn
+            [^js/Node root]
+            (concat
+              (array-seq (.querySelectorAll root (z/css-selector selector)))
+              (when deep?
+                (mapcat
+                  (fn [^js/Node node]
+                    (when-let [inner-root (.-shadowRoot node)]
+                      (select-fn inner-root)))
+                  (array-seq (.-childNodes root))))))]
+    (delayed !db delay select-fn root)))
+
+(defn select-closest
+  [{^js/Node root ::z/root ^js/Node current ::z/current !db ::sz/db}
+   selector
+   & {:keys [breach? delay]}]
+  (letfn [(select-fn
+            [^js/Node root ^js/Node current]
+            (or
+              (.closest current (z/css-selector selector))
+              (when breach?
+                (when (instance? js/ShadowRoot root)
+                  (let [new-current (.-host root)
+                        new-root (.getRootNode new-current)]
+                    (select-fn new-root new-current))))))]
+    (delayed !db delay select-fn root current)))
+
+(defn install!
+  [!db]
+  (zc/reg-effects !db
+    ::patch-internal-state patch-internal-state!
+    ::set-internal-state set-internal-state)
+  
+  (zc/reg-injections !db
+    ::select-one select-one
+    ::select-all select-all
+    ::select-closest select-closest)
+  
+  (zc/reg-components !db
+    ::echo
+    {:props #{:vdom}
+     :inherit-doc-css? true
+     :view (fn [{:keys [vdom]}]
+             vdom)}
+
+    ::listen
+    {:props {:sel :default
+             :evt :default
+             :act :default
+             :state (internal-state-prop (fn [] {:mut (atom nil)}))}
+     :view (partial listen-view !db)}
+
+    ::bind
+    {:props {:sel :default
+             :prop :default
+             :ref :default
+             :state (internal-state-prop (fn [] {:mut (atom nil)}))}
+     :view (partial bind-view !db)})
+  nil)

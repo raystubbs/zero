@@ -16,7 +16,7 @@ A toolkit for building web components in Clojure and ClojureScript.
 *State-heavy SPAs*. Zero provides a set of state management tools from the simple and easy to the simple and sophisticated. Start easy and scale up as you need to.
 
 ## Highlights
-- Depends only on ClojureScript core
+- ~~Depends only on ClojureScript core~~
 - Small, with optional 'extras' modules for more features
 - Hot reload friendly
 - Focus preserving updates

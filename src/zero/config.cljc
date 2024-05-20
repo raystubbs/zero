@@ -1,63 +1,64 @@
 (ns zero.config
-  (:refer-clojure :exclude [derive])
   (:require
-   [clojure.string :as str]
-   [zero.logger :as log]))
+   [subzero.core :as core]
+   [subzero.rstore :as rstore]
+   [zero.core :as-alias z]
+   [zero.impl.bindings :as-alias bnd]
+   [zero.impl.actions :as-alias act]
+   [zero.impl.injection :as-alias inj]
+   [zero.impl.signals :as-alias sig]
+   [subzero.plugins.component-registry :as component-registry]
+   [subzero.plugins.html :as html]
+   #?(:cljs [subzero.plugins.web-components :as web-components])))
+
+(defonce ^:no-doc !default-db (core/create-db))
 
 #?(:cljs
-   (do
+   (defn default-event-harvester
+     [^js/Event event]
+     (case (.-type event)
+       ("keyup" "keydown" "keypress")
+       {:key  (.-key event)
+        :code (.-code event)
+        :mods (cond-> #{}
+                (.-altKey event) (conj :alt)
+                (.-shiftKey event) (conj :shift)
+                (.-ctrlKey event) (conj :ctrl)
+                (.-metaKey event) (conj :meta))}
 
-     ;; should :zero.core/tag props be ignored?  useful for dev in
-     ;; some cases (e.g generated css with shadow-css or similar)
-     (goog-define disable-tags? false)
+       ("input" "change")
+       (let [target (.-target event)]
+         (when (or (instance? js/HTMLInputElement target) (instance? js/HTMLTextAreaElement target))
+           (case (.-type target)
+             "checkbox"
+             (.-checked target)
 
-     (defmulti harvest-event
-       (fn [^js/Event event]
-         (let [class (.-constructor event)]
-           (if (= class js/CustomEvent)
-             (keyword (.-type event))
-             class))))
+             "file"
+             (-> target .-files array-seq vec)
 
-     (defmethod harvest-event :default [^js/Event event]
-       (case (.-type event)
-         ("keyup" "keydown" "keypress")
-         {:key  (.-key event)
-          :code (.-code event)
-          :mods (cond-> #{}
-                  (.-altKey event) (conj :alt)
-                  (.-shiftKey event) (conj :shift)
-                  (.-ctrlKey event) (conj :ctrl)
-                  (.-metaKey event) (conj :meta))}
+             (.-value target))))
 
-         ("input" "change")
-         (let [target (.-target event)]
-           (when (or (instance? js/HTMLInputElement target) (instance? js/HTMLTextAreaElement target))
-             (case (.-type target)
-               "checkbox"
-               (.-checked target)
+       "submit"
+       (let [target (.-target event)]
+         (when (instance? js/HTMLFormElement target)
+           (js/FormData. target)))
 
-               "file"
-               (-> target .-files array-seq vec)
+       ("drop")
+       (->> event .-dataTransfer .-items array-seq
+         (mapv #(if (= "file" (.-kind %)) (.getAsFile %) (js/Blob. [(.getAsString %)] #js{:type (.-type %)}))))
 
-               (.-value target))))
-
-         "submit"
-         (let [target (.-target event)]
-           (when (instance? js/HTMLFormElement target)
-             (js/FormData. target)))
-
-         ("drop")
-         (->> event .-dataTransfer .-items array-seq
-           (mapv #(if (= "file" (.-kind %)) (.getAsFile %) (js/Blob. [(.getAsString %)] #js{:type (.-type %)}))))
-
+       ;; TODO: others
+       
+       (or
+         (.-detail event)
          ;; TODO: others
+         ))))
 
-         (or
-           (.-detail event))))))
-           ;; TODO: others
-           
-
-(defonce ^:no-doc !registry (atom {}))
+(defn- resolve-db-keyvals-args
+  [args]
+  (if (rstore/rstore? (first args))
+    [(first args) (apply array-map (rest args))]
+    [!default-db (apply array-map args)]))
 
 (defn reg-effects "
   Register one or more effects.
@@ -74,9 +75,14 @@
   
   (act ::echo \"Hello, World!\")
   ```
-" {:arglists '[[& keyvals]]}
-  [& {:as effect-specs}]
-  (swap! !registry update :effect-handlers (fnil into {}) effect-specs))
+" {:arglists '[[!db & keyvals] [& keyvals]]}
+  [& args]
+  (let [[!db effect-specs] (resolve-db-keyvals-args args)]
+    (rstore/patch! !db
+      {:path [::z/state ::act/effect-handlers]
+       :fnil {}
+       :change [:into effect-specs]}))
+  nil)
 
 (defn reg-streams "
   Register one or more data streams.
@@ -101,67 +107,114 @@
   stream instance, so the method will be called only once
   for each set of args used with the stream; until the
   stream has been spun down and must be restarted.
-" {:arglists '[[& keyvals]]}
-  [& {:as stream-specs}]
-  (swap! !registry update :stream-handlers (fnil into {}) stream-specs)
+" {:arglists '[[!db & keyvals] [& keyvals]]}
+  [& args]
+  (let [[!db stream-specs] (resolve-db-keyvals-args args)]
+    (rstore/patch! !db
+      {:path [::z/state ::bnd/stream-handlers]
+       :fnil {}
+       :change [:into stream-specs]}))
   nil)
 
 (defn reg-injections
-  [& {:as injection-specs}]
-  (swap! !registry update :injection-handlers (fnil into {}) injection-specs)
+  {:arglists '[[!db & keyvals] [& keyvals]]}
+  [& args]
+  (let [[!db injection-specs] (resolve-db-keyvals-args args)]
+    (rstore/patch! !db
+      {:path [::z/state ::inj/injection-handlers]
+       :fnil {}
+       :change [:into injection-specs]}))
   nil)
 
 (defn reg-components
-  [& {:as component-specs}]
-  (swap! !registry update :components (fnil into {}) component-specs)
+  {:arglists '[[!db & keyvals] [& keyvals]]}
+  [& args]
+  (let [[!db component-specs] (resolve-db-keyvals-args args)]
+    (doseq [[component-name component-spec] component-specs]
+      (component-registry/reg-component !db component-name component-spec)))
   nil)
 
 (defn reg-attr-writers
-  [& {:as new-attr-writers}]
-  (swap! !registry update :attr-writers
-    (fn [existing-attr-writers]
-      (with-meta (into (or existing-attr-writers {}) new-attr-writers)
-        {:cache (atom {})})))
+  {:arglists '[[!db & keyvals] [& keyvals]]}
+  [& args]
+  (let [[!db keyvals] (resolve-db-keyvals-args args)]
+    (component-registry/reg-attribute-writers !db (apply array-map keyvals)))
   nil)
 
 (defn reg-attr-readers
-  [& {:as new-attr-readers}]
-  (swap! !registry update :attr-readers
-    (fn [existing-attr-readers]
-      (with-meta (into (or existing-attr-readers {}) new-attr-readers)
-        {:cache (atom {})})))
+  {:arglists '[[!db & keyvals] [& keyvals]]}
+  [& args]
+  (let [[!db keyvals] (resolve-db-keyvals-args args)]
+    (component-registry/reg-attribute-readers !db (apply array-map keyvals)))
   nil)
 
-(defn- get-hierarchically
-  [m k]
-  (when (map? m)
-    (let [!cache (:cache (meta m))
-          cached (when !cache (get @!cache k ::not-found))]
-      (if (not= ::not-found cached)
-        cached
-        (let [found (or
-                      (get m k)
-                      (when-let [ns (when (keyword? k) (namespace k))]
-                        (let [ns-parts (vec (str/split ns #"\."))]
-                          (reduce
-                            (fn [answer i]
-                              (if-let [v (get m (keyword (str/join "." (subvec ns-parts 0 i)) "*"))]
-                                (reduced v)
-                                answer))
-                            nil
-                            (range (count ns-parts) -1 -1)))))]
-          (when !cache
-            (swap! !cache assoc k found))
-          found)))))
+(def ^:private default-opts
+  {:html? true
+   :web-components? true
+   :hot-reload? true
+   :harvest-event #?(:cljs default-event-harvester :clj nil)})
 
-(defn get-attr-reader
-  [component-name]
-  (or
-    (get-hierarchically (:attr-readers @!registry) component-name)
-    (fn [x & _] x)))
+(defn- preproc-vnode
+  [vnode]
+  (update vnode 1
+    (fn [props]
+      (cond-> props
+        true
+        (update-keys
+          (fn [k]
+            (if (and (keyword? k) (= "zero.core" (namespace k)))
+              (keyword (str "#" (name k)))
+              k)))
+        
+        (contains? props :zero.core/internals)
+        (update :#internals
+          (fn [internals]
+            (update-keys internals
+              (fn [k]
+                (if (and (keyword? k) (= "zero.core" (namespace k)))
+                  (keyword (str "#" (name k)))
+                  k)))))))))
 
-(defn get-attr-writer
-  [component-name]
-  (or
-    (get-hierarchically (:attr-writers @!registry) component-name)
-    (fn [x & _] x)))
+(defn install!
+  [!db & {:as opts}]
+  (let [merged-opts (merge default-opts opts)]
+    (when-not (::component-registry/state @!db)
+      (component-registry/install! !db))
+
+    (when (and (:html? merged-opts) (not (::html/state @!db)))
+      (html/install! !db
+        :render-listener
+        (fn [node-id k v]
+          [:zero.dom/listen
+           :sel (str "#" node-id)
+           :evt k
+           :act v])
+
+        :render-binding
+        (fn [node-id k v]
+          [:zero.dom/bind
+           :sel (str "#" node-id)
+           :prop k
+           :ref v])
+
+        :preproc-vnode
+        preproc-vnode))
+
+    #?(:cljs
+       (when
+         (and
+           js/document
+           js/customElements
+           (:web-components? merged-opts)
+           (not (::web-components/state @!db)))
+         (web-components/install! !db js/document js/customElements
+           :hot-reload? (:hot-reload? merged-opts)
+           :disable-tags? false
+           :preproc-vnode preproc-vnode
+           :after-render (resolve 'zero.impl.signals/after-render-sig)
+           :before-render (resolve 'zero.impl.signals/before-render-sig))))
+
+    (rstore/patch! !db
+      {:path [::z/state ::act/harvest-event]
+       :change [:value (:harvest-event merged-opts)]}))
+  nil)

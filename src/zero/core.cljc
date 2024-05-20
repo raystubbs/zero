@@ -2,11 +2,12 @@
   (:require
    [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
    [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
-   [zero.impl.injection #?@(:cljs [:refer [Injection]])] 
+   [zero.impl.injection #?@(:cljs [:refer [Injection]]) :as inj] 
    [zero.impl.signals #?@(:cljs [:refer [Signal]])]
-   [zero.impl.markup :as markup]
    [zero.config :as config]
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [subzero.core :as sz]
+   [zero.config :as zc])
   #?(:clj
      (:import
       (zero.impl.actions Action)
@@ -141,7 +142,7 @@ external happenstance.
 Given a keyword, returns the custom element name that'll be generated
 for a component with this name.
 " [kw]
-  (markup/kw->el-name kw))
+  (sz/element-name kw))
 
 (defn act?
   [x]
@@ -230,11 +231,11 @@ for a component with this name.
 
 (config/reg-effects
   ::choose
-  (fn [f & args]
-    (doseq [[effect-key & effect-args] (apply f args)]
-      (if-let [effect-handler (get-in @config/!registry [:effect-handlers effect-key])]
-        (apply effect-handler effect-args)
-        (throw (ex-info "No effect handler registered for key" {:key effect-key}))))))
+  (with-meta
+    (fn [ctx f & args]
+      (doseq [effect (apply f args)]
+        (act/do-effect! (::sz/db ctx) ctx effect)))
+    {::contextual true}))
 
 (config/reg-injections
   ::ctx
@@ -248,3 +249,9 @@ for a component with this name.
   ::<<
   (fn [_ & args]
     (apply << args)))
+
+(defn inject
+  ([context form]
+   (inject zc/!default-db context form))
+  ([!db context form]
+   (inj/apply-injections !db context form)))

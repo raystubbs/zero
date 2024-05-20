@@ -1,143 +1,242 @@
 (ns ^:no-doc zero.impl.bindings
   (:require
-   [zero.config :as config]
+   [zero.config :as zc]
    [zero.impl.injection :refer [apply-injections]]
-   [zero.impl.base :refer [try-catch]]
-   [zero.logger :as log]))
+   [zero.impl.base :refer [try-catch schedule cancel-scheduled]] 
+   [zero.core :as-alias z]
+   [subzero.core :as-alias sz]
+   [subzero.logger :as log]
+   [subzero.rstore :as rstore]
+   #?(:cljs [subzero.plugins.web-components :refer [IBindValue]]))
+  #?(:clj
+     (:import
+      [clojure.lang IDeref IRef IFn])))
 
-(defonce !stream-states (atom {}))
+(defrecord Binding [props key args])
 
-(defn- rx-fn [stream-ident]
-  (fn rx [new-val]
-    (let [{old-val :current watches :watches} (get @!stream-states stream-ident)]
-      (swap! !stream-states assoc-in [stream-ident :current] new-val)
-      (doseq [[[binding key] f] watches]
-        (try-catch
-          (f key binding old-val new-val)
-          (log/error "Error in stream watcher"
+(defn flush!
+  [!db]
+  (let [flush-id (gensym)
+        
+        flush-pending
+        (fn flush-pending
+          [stream-states]
+          (update-vals stream-states
+            (fn [{:keys [current pending] :or {pending ::none} :as state}]
+              (cond-> state
+                true
+                (dissoc :pending)
+                
+                (and (not= ::none pending) (not= current pending))
+                (assoc :current pending :flush-id flush-id)))))
+        
+        [old-db new-db]
+        (rstore/patch! !db
+          [{:path [::z/state ::stream-states]
+            :change [:call flush-pending]}
+           {:path [::z/state]
+            :change [:clear ::flush-streams-timeout]}])]
+    (when-let [timeout (get-in old-db [::z/state ::flush-streams-timeout])]
+      (cancel-scheduled timeout))
+    
+    (doseq [[stream-ident new-state] (get-in new-db [::z/state ::stream-states])
+            :when (= (:flush-id new-state) flush-id)
+            :let [old-state (get-in old-db [::z/state ::stream-states stream-ident])]
+            [[^Binding bnd k] watch-fn] (:watches new-state)]
+      (try-catch
+        (fn []
+          (let [default-value (:default (.-props bnd))
+                default-nil? (:default-nil? (.-props bnd))
+                old-current (get old-state :current default-value)
+                new-current (get new-state :current default-value)]
+            (watch-fn k bnd
+              (if (and (nil? old-current) default-nil?) default-value old-current)
+              (if (and (nil? new-current) default-nil?) default-value new-current))))
+        (fn [ex]
+          (log/error "Error in stream watcher fn"
             :data {:stream stream-ident}
-            :ex %))))))
+            :ex ex)))))
+  nil)
 
-(defprotocol IBinding
-  (^:private -bnd-deref [b])
-  (^:private -bnd-add-watch [b key f])
-  (^:private -bnd-remove-watch [b key])
-  (^:private -bnd-equiv [b other])
-  (^:private -bnd-hash [b])
-  (^:private ^String -bnd-write [b]))
+(defn- schedule-flush!
+  [!db]
+  (locking !db
+    (when (nil? (get-in @!db [::z/state ::flush-streams-timeout]))
+      (rstore/patch! !db
+        {:path [::z/state ::flush-streams-timeout]
+         :change [:value (schedule 5 flush! !db)]})))
+  nil)
+
+(defn- rx-fn
+  [!db stream-ident]
+  (fn rx
+    [new-val]
+    (rstore/patch! !db
+      {:path [::z/state ::stream-states stream-ident :pending]
+       :change [:value new-val]})
+    (schedule-flush! !db)))
+
+(defn- kill-stream!
+  [!db [key args :as stream-ident]]
+  (let [[old-db _] (rstore/patch! !db
+                     {:path [::z/state ::stream-states]
+                      :change [:clear stream-ident]})]
+    (when-let [kill-fn (get-in old-db [::z/state ::stream-states stream-ident :kill-fn])]
+      (try-catch
+        kill-fn
+        (fn [ex]
+          (log/error "Error killing stream"
+            :data {:key key :args args}
+            :ex ex))))
+    (rstore/unwatch !db [::stream stream-ident]))
+  nil)
+
+(defn- boot-stream!
+  [!db [stream-key args :as stream-ident]]
+  (try-catch
+    (fn []
+      (let [handler-path [::z/state ::stream-handlers stream-key]
+            stream-fn (or (get-in @!db handler-path)
+                        (throw
+                          (ex-info "No stream registered for key"
+                            {:stream-key stream-key})))
+            kill-fn (apply stream-fn
+                      (rx-fn !db stream-ident)
+                      (apply-injections !db {::sz/db !db} args))]
+        (rstore/patch! !db
+          {:path [::z/state ::stream-states stream-ident :kill-fn]
+           :change [:value kill-fn]})
+        (rstore/watch !db [::stream stream-ident] handler-path
+          (fn [_ new-stream-fn _]
+            (let [!tmp-pending (atom ::none)
+                  !rx-fn (atom #(reset! !tmp-pending %))
+                  new-kill-fn (apply new-stream-fn
+                                #(@!rx-fn %)
+                                (apply-injections !db {::sz/db !db} args))
+                  [old-db _] (rstore/patch! !db
+                               [{:path [::z/state ::stream-states stream-ident :kill-fn]
+                                 :change [:value new-kill-fn]}])]
+              (when-let [old-kill-fn (get-in old-db [::z/state ::stream-states stream-ident :kill-fn])]
+                (old-kill-fn))
+              (when-not (= @!tmp-pending ::none)
+                (locking !tmp-pending
+                  (rstore/patch! !db
+                    {:path [::z/state ::stream-states stream-ident :pending]
+                     :change [:value @!tmp-pending]})
+                  (reset! !rx-fn (rx-fn !db stream-ident)))
+                (schedule-flush! !db)))))))
+    (fn [ex]
+      (log/error "Error booting stream"
+        :data {:key key :args args}
+        :ex ex)
+      (rstore/patch! !db
+        {:path [::z/state ::stream-states]
+         :change [:clear stream-ident]})))
+  nil)
+
+(defn- get-ref
+  [!db ^Binding bnd]
+  (let [stream-ident [(.-key bnd) (.-args bnd)]
+        props (.-props bnd)
+        
+        deref-fn
+        (fn deref-fn
+          []
+          (let [v (get-in @!db [::z/state ::stream-states stream-ident :current] (:default props))]
+            (if (and (nil? v) (:default-nil? props))
+              (:default props)
+              v)))
+        
+        add-watch-fn
+        (fn add-watch-fn
+          [k f]
+          (let [[old-db _new-db]
+                (rstore/patch! !db
+                  {:path [::z/state ::stream-states stream-ident :watches [bnd k]]
+                   :change [:value f]})]
+            (when (empty? (get-in old-db [::z/state :stream-states stream-ident :watches]))
+              (boot-stream! !db stream-ident)))
+          nil)
+        
+        remove-watch-fn
+        (fn remove-watch-fn
+          [k]
+          (let [[old-db new-db]
+                (rstore/patch! !db
+                  {:path [::z/state ::stream-states stream-ident :watches]
+                   :change [:clear [bnd k]]})]
+            (when
+              (and
+                (empty? (get-in new-db [::z/state :stream-states stream-ident :watches]))
+                (seq (get-in old-db [::z/state :stream-states stream-ident :watches])))
+              (kill-stream! !db stream-ident)))
+          nil)]
+    #?(:cljs
+       (reify 
+         IDeref
+         (-deref [_] (deref-fn))
+         
+         IWatchable
+         (-add-watch [_ k f] (add-watch-fn k f))
+         (-remove-watch [_ k] (remove-watch-fn k)))
+       
+       :clj
+       (reify
+         clojure.lang.IDeref
+         (deref [_] (deref-fn))
+         
+         clojure.lang.IRef
+         (addWatch [_ k f] (add-watch-fn k f))
+         (removeWatch [_ k] (remove-watch-fn k))
+         (getWatches [_] (throw (UnsupportedOperationException.)))
+         (getValidator [_] (throw (UnsupportedOperationException.)))
+         (setValidator [_ _] (throw (UnsupportedOperationException.)))))))
+
 
 #?(:cljs
-   (deftype Binding [props stream-key args]
+   (extend-type Binding
      IDeref
-     (-deref [this] (-bnd-deref this))
+     (-deref
+       [bnd]
+       (-deref (get-ref zc/!default-db bnd)))
 
      IWatchable
-     (-add-watch [this key f] (-bnd-add-watch this key f))
-     (-remove-watch [this key] (-bnd-remove-watch this key))
+     (-add-watch
+       [bnd k f]
+       (-add-watch (get-ref zc/!default-db bnd) k f))
+     (-remove-watch
+       [bnd k]
+       (-remove-watch (get-ref zc/!default-db bnd) k))
 
-     IEquiv
-     (-equiv [this ^Binding other] (-bnd-equiv this other))
+     IFn
+     (-invoke
+       ([bnd !db]
+        (get-ref !db bnd)))
 
-     IHash
-     (-hash [this] (-bnd-hash this))
-
-     IPrintWithWriter
-     (-pr-writer [this writer opts]
-       (-write writer (-bnd-write this))))
+     IBindValue
+     (get-bind-watchable
+       [bnd !db]
+       (get-ref !db bnd)))
 
    :clj
-   (deftype Binding [props stream-key args]
-     clojure.lang.IDeref
-     (deref [this] (-bnd-deref this))
+   (extend-type Binding
+     IDeref
+     (deref
+       [bnd]
+       (.deref ^IDeref (get-ref zc/!default-db bnd)))
 
-     clojure.lang.IRef
-     (addWatch [this key f] (-bnd-add-watch this key f))
-     (removeWatch [this key] (-bnd-remove-watch this key))
-     (getWatches [this] (throw (UnsupportedOperationException.)))
-     (getValidator [this] (throw (UnsupportedOperationException.)))
-     (setValidator [this f] (throw (UnsupportedOperationException.)))
+     IRef
+     (addWatch
+       [bnd k f]
+       (.addWatch ^IRef (get-ref zc/!default-db bnd) k f))
+     (removeWatch
+       [bnd k]
+       (.removeWatch ^IRef (get-ref zc/!default-db bnd) k))
+     (getWatches [_] (throw (UnsupportedOperationException.)))
+     (getValidator [_] (throw (UnsupportedOperationException.)))
+     (setValidator [_ _] (throw (UnsupportedOperationException.)))
 
-     Object
-     (equals [this other] (-bnd-equiv this other))
-     (toString [this] (-bnd-write this))
-     (hashCode [this] (-bnd-hash this))))
-
-(extend-type Binding
-  IBinding
-  (-bnd-deref [^Binding b]
-    (let [v (get-in @!stream-states [[(.-stream-key b) (.-args b)] :current] (:default (.-props b)))]
-      (if (and (:default-nil? (.-props b)) (nil? v)) (:default (.-props b)) v)))
-  (-bnd-add-watch [^Binding b key f]
-    (let [actual-fun (if (:default-nil? (.-props b))
-                       (fn [ref key old-val new-val]
-                         (f ref key old-val (if (nil? new-val) (:default (.-props b)) new-val)))
-                       f)
-          stream-ident [(.-stream-key b) (.-args b)]
-          [old _] (swap-vals! !stream-states assoc-in [stream-ident :watches [b key]] actual-fun)] 
-      (when (nil? (get old stream-ident))
-        (try-catch
-          (let [stream-fn (or (get-in @config/!registry [:stream-handlers (.-stream-key b)]) (throw (ex-info "No stream registered for key" {:stream-key (.-stream-key b)})))
-                kill-fn (apply stream-fn (rx-fn stream-ident) (apply-injections (.-args b) {}))]
-            (swap! !stream-states assoc-in [stream-ident :kill-fn] kill-fn)
-            nil)
-          (do
-            (log/error "Error booting stream"
-              :data {:stream (.-stream-key b)
-                     :args (.-args b)}
-              :ex %)
-            (swap! !stream-states dissoc stream-ident))))))
-  (-bnd-remove-watch [^Binding b key]
-    (let [stream-ident [(.-stream-key b) (.-args b)]
-          [old new] (swap-vals! !stream-states
-                      (fn [stream-states]
-                        (let [new-watches (dissoc (get-in stream-states [stream-ident :watches]) [b key])]
-                          (if (empty? new-watches)
-                            (dissoc stream-states stream-ident)
-                            (assoc-in stream-states [stream-ident :watches] new-watches)))))]
-      (when (nil? (get new stream-ident))
-        (when-let [kill-fn (get-in old [stream-ident :kill-fn])]
-          (try-catch
-            (kill-fn)
-            (log/error "Error in stream cleanup fn"
-              :data {:stream (nth stream-ident 0)
-                     :args (nth stream-ident 1)}
-              :ex %))))))
-  (-bnd-equiv [^Binding b ^Binding other]
-    (and
-      (instance? Binding other)
-      (= (.-stream-key b) (.-stream-key other))
-      (= (.-args b) (.-args other))
-      (= (.-props b) (.-props other))))
-  (-bnd-hash [^Binding b]
-    (hash [(.-props b) (.-stream-key b) (.-args b)]))
-  (-bnd-write [^Binding b]
-    (pr-str
-      (concat
-        ['bnd (.-stream-key b)]
-        (when (seq (.-props b))
-          [(.-props b)])
-        (.-args b)))))
-
-(defn- update-streams! [{old-stream-handlers :stream-handlers} {new-stream-handlers :stream-handlers}]
-  (when-not (identical? old-stream-handlers new-stream-handlers)
-    (doseq [[stream-key stream-handler] new-stream-handlers
-            :when (not= stream-handler (get old-stream-handlers stream-key))
-            [[_ args :as stream-ident] {kill-fn :kill-fn}] (filter #(= stream-key (-> % key first)) @!stream-states)]
-      (when (fn? kill-fn)
-        (try-catch
-          (kill-fn)
-          (log/error "Error in stream cleanup fn"
-            :data {:stream stream-key :args args}
-            :ex %)))
-      (try-catch
-        (swap! !stream-states assoc-in [stream-ident :kill-fn]
-          (apply stream-handler (rx-fn stream-ident) (apply-injections args {}))) 
-        (log/error "Error in stream boot fn, hot swap failed"
-          :data {:stream stream-key :args args}
-          :ex %)))))
-
-(add-watch config/!registry ::update-streams #(update-streams! %3 %4))
-(update-streams! {} @config/!registry)
-
-#?(:clj
-   (defmethod print-method Binding [bnd w] (.write w (-bnd-write bnd))))
+     IFn
+     (invoke
+       [bnd !db]
+       (get-ref !db bnd))))

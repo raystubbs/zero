@@ -1,68 +1,31 @@
 (ns ^:no-doc zero.impl.injection
   (:require
    [clojure.walk :refer [postwalk]]
-   [zero.logger :as log]
+   [subzero.logger :as log]
    [zero.impl.base :refer [try-catch]]
-   [zero.config :as config]))
+   [zero.core :as-alias z]))
 
-(defprotocol IInjection
-  (^:private -inj-injected [inj context !cache])
-  (^:private -inj-equiv [inj other])
-  (^:private -inj-hash [inj])
-  (^:private -inj-write [inj]))
+(defrecord Injection [key args])
 
-#?(:cljs
-   (deftype Injection [injector-key args]
-     IEquiv
-     (-equiv [this other] (-inj-equiv this other))
-
-     IHash
-     (-hash [this] (-inj-hash this))
-
-     IPrintWithWriter
-     (-pr-writer [this writer _opts]
-       (-write writer (-inj-write this))))
-
-   :clj
-   (deftype Injection [injector-key args]
-     Object
-     (equals [this other] (-inj-equiv this other))
-     (toString [this] (-inj-write this))
-     (hashCode [this] (-inj-hash this))))
-
-(extend-type Injection
-  IInjection
-  (-inj-injected [^Injection inj context !cache]
-    (let [cache-key [(.-injector-key inj) (.-args inj)]]
-      (if (contains? @!cache cache-key)
-        (get @!cache cache-key)
-        (try-catch
-          (let [injector (or (get-in @config/!registry [:injection-handlers (.-injector-key inj)])
-                           (throw (ex-info "No injector registered for key" {:injector-key (.-injector-key inj)})))
-                r (apply injector context (postwalk #(if (instance? Injection %) (-inj-injected % context !cache) %) (.-args inj)))]
-            (swap! !cache assoc cache-key r)
-            r)
-          (log/error "Error injecting"
-            :data {:injection inj}
-            :ex %)))))
-  (-inj-equiv [^Injection inj ^Injection other]
-    (and
-      (instance? Injection other)
-      (= (.-injector-key inj) (.-injector-key other))
-      (= (.-args inj) (.-args other))))
-  (-inj-hash [^Injection inj]
-    (hash [(.-injector-key inj) (.-args inj)]))
-  (-inj-write [^Injection inj]
-    (pr-str (concat ['<< (.-injector-key inj)] (.-args inj)))))
-
-(defn apply-injections [x context]
+(defn apply-injections [!db context x]
   (let [!cache (atom {})]
     (postwalk
-      (fn [form]
-        (if (instance? Injection form)
-          (-inj-injected form context !cache)
-          form))
+      (fn walker [form]
+        (if-not (instance? Injection form)
+          form
+          (let [inj ^Injection form
+                cache-key [(.-key inj) (.-args inj)]]
+            (if (contains? @!cache cache-key)
+              (get @!cache cache-key)
+              (try-catch
+                (fn []
+                  (let [injector (or (get-in @!db [::z/state ::injection-handlers (.-key inj)])
+                                   (throw (ex-info "No injector registered for key" {:key (.-key inj)})))
+                        r (apply injector context (postwalk walker (.-args inj)))]
+                    (swap! !cache assoc cache-key r)
+                    r))
+                (fn [ex]
+                  (log/error "Error injecting"
+                    :data {:injection inj}
+                    :ex ex)))))))
       x)))
-
-#?(:clj
-   (defmethod print-method Injection [inj w] (.write w (-inj-write inj))))

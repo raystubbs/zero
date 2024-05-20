@@ -1,7 +1,7 @@
 (ns zero.extras.util
   (:require 
    [zero.impl.base :refer [try-catch try-deref]]
-   [zero.logger :as log]))
+   [subzero.logger :as log]))
 
 (defn derived
   [f & deps]
