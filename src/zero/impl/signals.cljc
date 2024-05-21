@@ -36,8 +36,8 @@
        ([sig]
         (-invoke sig zc/!default-db))
        ([sig !db]
-        (doseq [{:keys [f arg]} (some-> (get-in @!db [::z/state ::listeners (.-key sig)]) vals)]
-          (f arg))
+        (doseq [f (some-> (get-in @!db [::z/state ::listeners (.-key sig)]) vals)]
+          (f))
         nil))
 
      IListenKey

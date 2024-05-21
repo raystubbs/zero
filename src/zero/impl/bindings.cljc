@@ -16,47 +16,43 @@
 
 (defn flush!
   [!db]
-  (let [flush-id (gensym)
-        
-        flush-pending
-        (fn flush-pending
-          [stream-states]
-          (update-vals stream-states
-            (fn [{:keys [current pending] :or {pending ::none} :as state}]
-              (cond-> state
-                true
-                (dissoc :pending)
-                
-                (and (not= ::none pending) (not= current pending))
-                (assoc :current pending :flush-id flush-id)))))
-        
-        [old-db new-db]
+  (let [[old-db _]
         (rstore/patch! !db
-          [{:path [::z/state ::stream-states]
-            :change [:call flush-pending]}
-           {:path [::z/state]
-            :change [:clear ::flush-streams-timeout]}])]
-    (when-let [timeout (get-in old-db [::z/state ::flush-streams-timeout])]
-      (cancel-scheduled timeout))
-    
-    (doseq [[stream-ident new-state] (get-in new-db [::z/state ::stream-states])
-            :when (= (:flush-id new-state) flush-id)
-            :let [old-state (get-in old-db [::z/state ::stream-states stream-ident])]
-            [[^Binding bnd k] watch-fn] (:watches new-state)]
-      (try-catch
-        (fn []
-          (let [default-value (:default (.-props bnd))
-                default-nil? (:default-nil? (.-props bnd))
-                old-current (get old-state :current default-value)
-                new-current (get new-state :current default-value)]
-            (watch-fn k bnd
-              (if (and (nil? old-current) default-nil?) default-value old-current)
-              (if (and (nil? new-current) default-nil?) default-value new-current))))
-        (fn [ex]
-          (log/error "Error in stream watcher fn"
-            :data {:stream stream-ident}
-            :ex ex)))))
-  nil)
+          {:path [::z/state ::pending-stream-values]
+           :change [:value {}]})
+
+        pending-values (get-in old-db [::z/state ::pending-stream-values])] 
+    (cond
+      (seq pending-values)
+      (do
+        (doseq [[stream-ident new-value] pending-values
+                :let [[old-db _ :as patch-r]
+                      (rstore/patch! !db
+                        {:path [::z/state ::stream-states stream-ident :current]
+                         :change [:value new-value]}
+                        :when (fn [db]
+                                (and
+                                  (= ::none (get-in db [::z/state ::pending-stream-values stream-ident] ::none))
+                                  (get-in db [::z/state ::stream-states stream-ident]))))]
+                :when (some? patch-r)
+                :let [{old-value :current watches :watches} (get-in old-db [::z/state ::stream-states stream-ident])]
+                [[^Binding bnd k] watch-fn] watches
+                :when (not= old-value new-value)]
+          (try-catch
+            (fn []
+              (let [default-value (:default (.-props bnd))
+                    default-nil? (:default-nil? (.-props bnd))]
+                (watch-fn k bnd
+                  (if (and (nil? old-value) default-nil?) default-value old-value)
+                  (if (and (nil? new-value) default-nil?) default-value new-value))))
+            (fn [ex]
+              (log/error "Error in stream watcher fn"
+                :data {:stream stream-ident}
+                :ex ex))))
+        nil)
+      
+      (seq (get-in @!db [::z/state ::pending-stream-values]))
+      (recur !db))))
 
 (defn- schedule-flush!
   [!db]
@@ -64,7 +60,14 @@
     (when (nil? (get-in @!db [::z/state ::flush-streams-timeout]))
       (rstore/patch! !db
         {:path [::z/state ::flush-streams-timeout]
-         :change [:value (schedule 5 flush! !db)]})))
+         :change [:value (schedule 5
+                           (fn []
+                             (let [[old-db _]
+                                   (rstore/patch! !db
+                                     {:path [::z/state]
+                                      :change [:clear ::flush-streams-timeout]})]
+                               (when (get-in old-db [::z/state ::flush-streams-timeout])
+                                 (flush! !db)))))]})))
   nil)
 
 (defn- rx-fn
@@ -72,7 +75,7 @@
   (fn rx
     [new-val]
     (rstore/patch! !db
-      {:path [::z/state ::stream-states stream-ident :pending]
+      {:path [::z/state ::pending-stream-values stream-ident]
        :change [:value new-val]})
     (schedule-flush! !db)))
 
@@ -121,7 +124,7 @@
               (when-not (= @!tmp-pending ::none)
                 (locking !tmp-pending
                   (rstore/patch! !db
-                    {:path [::z/state ::stream-states stream-ident :pending]
+                    {:path [::z/state ::pending-stream-values stream-ident]
                      :change [:value @!tmp-pending]})
                   (reset! !rx-fn (rx-fn !db stream-ident)))
                 (schedule-flush! !db)))))))
