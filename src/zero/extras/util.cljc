@@ -10,8 +10,9 @@
           !dep-vals (atom nil)
           on-deps (fn [dep-vals]
                     (try-catch
-                      (rx (apply f dep-vals args)) 
-                      (log/error "Error in derived stream function" :ex %)))]
+                      #(rx (apply f dep-vals args))
+                      (fn [ex]
+                        (log/error "Error in derived stream function" :ex ex))))]
       (doseq [[idx dep] (map-indexed vector deps)]
         (add-watch dep watch-id
           (fn [_ _ _ new-val]
@@ -44,8 +45,9 @@
   (let [!dep-vals (atom nil)
         on-deps (fn [dep-vals]
                   (try-catch
-                    (apply f dep-vals) 
-                    (log/error "Error in watch function" :ex %)))]
+                    #(apply f dep-vals)
+                    (fn [ex]
+                      (log/error "Error in watch function" :ex ex))))]
     (doseq [[idx dep] (map-indexed vector deps)]
       (add-watch dep [::watch key]
         (fn [_ _ _ new-val]

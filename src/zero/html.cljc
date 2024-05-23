@@ -12,7 +12,7 @@ instead.
   (:require
    [zero.dom :as-alias dom]
    [zero.config :as zc]
-   [subzero.html :as html]))
+   [subzero.plugins.html :as html]))
 
 (defn write-html "
 Write Zero markup to a writer as HTML.

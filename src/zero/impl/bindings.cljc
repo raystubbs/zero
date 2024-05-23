@@ -1,8 +1,8 @@
 (ns ^:no-doc zero.impl.bindings
   (:require
-   [zero.config :as zc]
    [zero.impl.injection :refer [apply-injections]]
-   [zero.impl.base :refer [try-catch schedule cancel-scheduled]] 
+   [zero.impl.base :refer [try-catch schedule cancel-scheduled]]
+   [zero.impl.default-db :refer [!default-db]]
    [zero.core :as-alias z]
    [subzero.core :as-alias sz]
    [subzero.logger :as log]
@@ -12,7 +12,30 @@
      (:import
       [clojure.lang IDeref IRef IFn])))
 
-(defrecord Binding [props key args])
+(declare ^:private get-ref)
+
+(defrecord Binding [props key args]
+  #?@(:clj
+      [IDeref
+       (deref
+         [bnd]
+         (.deref ^IDeref (get-ref !default-db bnd)))
+
+       IRef
+       (addWatch
+         [bnd k f]
+         (.addWatch ^IRef (get-ref !default-db bnd) k f))
+       (removeWatch
+         [bnd k]
+         (.removeWatch ^IRef (get-ref !default-db bnd) k))
+       (getWatches [_] (throw (UnsupportedOperationException.)))
+       (getValidator [_] (throw (UnsupportedOperationException.)))
+       (setValidator [_ _] (throw (UnsupportedOperationException.)))
+
+       IFn
+       (invoke
+         [bnd !db]
+         (get-ref !db bnd))]))
 
 (defn flush!
   [!db]
@@ -21,37 +44,32 @@
           {:path [::z/state ::pending-stream-values]
            :change [:value {}]})
 
-        pending-values (get-in old-db [::z/state ::pending-stream-values])] 
-    (cond
-      (seq pending-values)
-      (do
-        (doseq [[stream-ident new-value] pending-values
-                :let [[old-db _ :as patch-r]
-                      (rstore/patch! !db
-                        {:path [::z/state ::stream-states stream-ident :current]
-                         :change [:value new-value]}
-                        :when (fn [db]
-                                (and
-                                  (= ::none (get-in db [::z/state ::pending-stream-values stream-ident] ::none))
-                                  (get-in db [::z/state ::stream-states stream-ident]))))]
-                :when (some? patch-r)
-                :let [{old-value :current watches :watches} (get-in old-db [::z/state ::stream-states stream-ident])]
-                [[^Binding bnd k] watch-fn] watches
-                :when (not= old-value new-value)]
-          (try-catch
-            (fn []
-              (let [default-value (:default (.-props bnd))
-                    default-nil? (:default-nil? (.-props bnd))]
-                (watch-fn k bnd
-                  (if (and (nil? old-value) default-nil?) default-value old-value)
-                  (if (and (nil? new-value) default-nil?) default-value new-value))))
-            (fn [ex]
-              (log/error "Error in stream watcher fn"
-                :data {:stream stream-ident}
-                :ex ex))))
-        nil)
-      
-      (seq (get-in @!db [::z/state ::pending-stream-values]))
+        pending-values (get-in old-db [::z/state ::pending-stream-values])]
+    (when (seq pending-values)
+      (doseq [[stream-ident new-value] pending-values
+              :let [[old-db _ :as patch-r]
+                    (rstore/patch! !db
+                      {:path [::z/state ::stream-states stream-ident :current]
+                       :change [:value new-value]}
+                      :when (fn [db]
+                              (and
+                                (= ::none (get-in db [::z/state ::pending-stream-values stream-ident] ::none))
+                                (get-in db [::z/state ::stream-states stream-ident]))))]
+              :when (some? patch-r)
+              :let [{old-value :current watches :watches} (get-in old-db [::z/state ::stream-states stream-ident])]
+              [[^Binding bnd k] watch-fn] watches
+              :when (not= old-value new-value)]
+        (try-catch
+          (fn []
+            (let [default-value (:default (.-props bnd))
+                  default-nil? (:default-nil? (.-props bnd))]
+              (watch-fn k bnd
+                (if (and (nil? old-value) default-nil?) default-value old-value)
+                (if (and (nil? new-value) default-nil?) default-value new-value))))
+          (fn [ex]
+            (log/error "Error in stream watcher fn"
+              :data {:stream stream-ident}
+              :ex ex))))
       (recur !db))))
 
 (defn- schedule-flush!
@@ -201,15 +219,15 @@
      IDeref
      (-deref
        [bnd]
-       (-deref (get-ref zc/!default-db bnd)))
+       (-deref (get-ref !default-db bnd)))
 
      IWatchable
      (-add-watch
        [bnd k f]
-       (-add-watch (get-ref zc/!default-db bnd) k f))
+       (-add-watch (get-ref !default-db bnd) k f))
      (-remove-watch
        [bnd k]
-       (-remove-watch (get-ref zc/!default-db bnd) k))
+       (-remove-watch (get-ref !default-db bnd) k))
 
      IFn
      (-invoke
@@ -218,28 +236,5 @@
 
      IBindValue
      (get-bind-watchable
-       [bnd !db]
-       (get-ref !db bnd)))
-
-   :clj
-   (extend-type Binding
-     IDeref
-     (deref
-       [bnd]
-       (.deref ^IDeref (get-ref zc/!default-db bnd)))
-
-     IRef
-     (addWatch
-       [bnd k f]
-       (.addWatch ^IRef (get-ref zc/!default-db bnd) k f))
-     (removeWatch
-       [bnd k]
-       (.removeWatch ^IRef (get-ref zc/!default-db bnd) k))
-     (getWatches [_] (throw (UnsupportedOperationException.)))
-     (getValidator [_] (throw (UnsupportedOperationException.)))
-     (setValidator [_ _] (throw (UnsupportedOperationException.)))
-
-     IFn
-     (invoke
        [bnd !db]
        (get-ref !db bnd))))

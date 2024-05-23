@@ -1,19 +1,31 @@
 (ns ^:no-doc zero.impl.signals
   (:require
-   [zero.impl.base :refer [dissoc-in]]
-   [zero.core :as-alias z]
-   [subzero.rstore :as rstore]
-   #?(:cljs [subzero.plugins.web-components :refer [IListenKey]])
-   [zero.config :as zc])
+    [subzero.logger :as log]
+    [zero.impl.base :refer [dissoc-in]]
+    [zero.impl.default-db :refer [!default-db]]
+    [zero.core :as-alias z]
+    [subzero.rstore :as rstore]
+    #?(:cljs [subzero.plugins.web-components :refer [IListenKey]]))
   #?(:clj
      (:import
       (clojure.lang IFn))))
 
-(defrecord Signal [key])
+(defrecord Signal [key]
+  #?@(:clj
+      [IFn
+       (invoke
+         [sig !db]
+         (doseq [f (some-> (get-in @!db [::z/state ::listeners (.-key sig)]) vals)]
+           (f))
+         nil)
+       (invoke
+         [sig]
+         (.invoke sig !default-db)
+         nil)]))
 
 (defn listen
   ([^Signal sig k f]
-   (listen zc/!default-db sig k f))
+   (listen !default-db sig k f))
   ([!db ^Signal sig k f]
    (rstore/patch! !db
      {:path [::z/state ::listeners (.-key sig) k]
@@ -22,7 +34,7 @@
 
 (defn unlisten
   ([^Signal sig k]
-   (unlisten zc/!default-db sig k))
+   (unlisten !default-db sig k))
   ([!db ^Signal sig k]
    (rstore/patch! !db
      {:path [::z/state ::listeners]
@@ -33,12 +45,12 @@
    (extend-type Signal
      IFn
      (-invoke
-       ([sig]
-        (-invoke sig zc/!default-db))
        ([sig !db]
         (doseq [f (some-> (get-in @!db [::z/state ::listeners (.-key sig)]) vals)]
           (f))
-        nil))
+        nil)
+       ([sig]
+        (sig !default-db)))
 
      IListenKey
      (listen
@@ -46,20 +58,7 @@
        (zero.impl.signals/listen !db sig [sig target] listener-fun))
      (unlisten
        [sig !db target]
-       (zero.impl.signals/unlisten !db sig [sig target])))
-   
-   :clj
-   (extend-type Signal
-     IFn
-     (invoke
-       [sig !db]
-       (doseq [f (some-> (get-in @!db [::z/state ::listeners (.-key sig)]) vals)]
-         (f))
-       nil)
-     (invoke
-       [sig]
-       (.invoke sig zc/!default-db)
-       nil)))
+       (zero.impl.signals/unlisten !db sig [sig target]))))
 
 
 (def ^:no-doc after-render-sig (Signal. ::z/after-render))

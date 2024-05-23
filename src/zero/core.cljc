@@ -1,13 +1,13 @@
 (ns zero.core
   (:require
-   [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
-   [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
-   [zero.impl.injection #?@(:cljs [:refer [Injection]]) :as inj] 
-   [zero.impl.signals #?@(:cljs [:refer [Signal]])]
-   [zero.config :as config]
-   [clojure.string :as str]
-   [subzero.core :as sz]
-   [zero.config :as zc])
+    [zero.config :as zc]
+    [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
+    [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
+    [zero.impl.injection #?@(:cljs [:refer [Injection]]) :as inj]
+    [zero.impl.signals #?@(:cljs [:refer [Signal]]) :as sig]
+    [zero.impl.base :as base]
+    [clojure.string :as str]
+    [subzero.core :as sz])
   #?(:clj
      (:import
       (zero.impl.actions Action)
@@ -63,7 +63,7 @@ when called.
   (let [[props effects] (if (map? (first things))
                           [(first things) (rest things)]
                           [{} things])]
-    (Action. props (filterv some? effects))))
+    (base/callable (Action. props (filterv some? effects)))))
 
 (defn bnd "
 Construct a binding.
@@ -87,7 +87,7 @@ to be held on to.
   (let [[props stream-key args] (if (map? (first things))
                                   [(first things) (second things) (nthrest things 2)]
                                   [{} (first things) (rest things)])]
-    (Binding. props stream-key (vec args))))
+    (base/callable (Binding. props stream-key (vec args)))))
 
 (def ^{:arglists '[[injection-key & args]]}
   << "
@@ -136,7 +136,7 @@ external happenstance.
     ;; elsewhere
     (my-sig)
 " [k]
-  (Signal. k))
+  (base/callable (Signal. k)))
 
 (defn element-name "
 Given a keyword, returns the custom element name that'll be generated
@@ -229,7 +229,7 @@ for a component with this name.
       (apply << ::<< args))
     {::injector-fn true}))
 
-(config/reg-effects
+(zc/reg-effects
   ::choose
   (with-meta
     (fn [ctx f & args]
@@ -237,7 +237,7 @@ for a component with this name.
         (act/do-effect! (::sz/db ctx) ctx effect)))
     {::contextual true}))
 
-(config/reg-injections
+(zc/reg-injections
   ::ctx
   (fn [ctx & path]
     (get-in ctx path))
@@ -255,3 +255,23 @@ for a component with this name.
    (inject zc/!default-db context form))
   ([!db context form]
    (inj/apply-injections !db context form)))
+
+(def after-render-sig sig/after-render-sig)
+(def before-render-sig sig/before-render-sig)
+
+(defn sig-listen
+  [sig k f]
+  (sig/listen sig k f))
+
+(defn sig-listen-once
+  [sig k f]
+  (sig/listen sig k
+    (fn []
+      (try
+        (f)
+        (finally
+          (sig/unlisten sig k))))))
+
+(defn sig-unlisten
+  [sig k]
+  (sig/unlisten sig k))

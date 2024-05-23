@@ -1,24 +1,23 @@
 (ns zero.config
   (:require
-   [subzero.core :as core]
    [subzero.rstore :as rstore]
    [zero.core :as-alias z]
-   [zero.impl.bindings :as-alias bnd]
+   [zero.impl.default-db :as default-db]
+   [zero.impl.bindings :as bnd]
+   [zero.impl.signals :as sig]
    [zero.impl.actions :as-alias act]
    [zero.impl.injection :as-alias inj]
-   [zero.impl.signals :as-alias sig]
    [subzero.plugins.component-registry :as component-registry]
    [subzero.plugins.html :as html]
    #?(:cljs [subzero.plugins.web-components :as web-components])))
 
-(defonce ^:no-doc !default-db (core/create-db))
+(def !default-db default-db/!default-db)
 
 #?(:cljs
-   (defn default-event-harvester
-     [^js/Event event]
+   (defn default-event-harvester [^js/Event event]
      (case (.-type event)
        ("keyup" "keydown" "keypress")
-       {:key  (.-key event)
+       {:key (.-key event)
         :code (.-code event)
         :mods (cond-> #{}
                 (.-altKey event) (conj :alt)
@@ -48,7 +47,7 @@
          (mapv #(if (= "file" (.-kind %)) (.getAsFile %) (js/Blob. [(.getAsString %)] #js{:type (.-type %)}))))
 
        ;; TODO: others
-       
+
        (or
          (.-detail event)
          ;; TODO: others
@@ -130,22 +129,37 @@
   {:arglists '[[!db & keyvals] [& keyvals]]}
   [& args]
   (let [[!db component-specs] (resolve-db-keyvals-args args)]
-    (doseq [[component-name component-spec] component-specs]
-      (component-registry/reg-component !db component-name component-spec)))
+    (when-not (rstore/patch! !db
+                {:path [::z/state ::pending-components]
+                 :fnil {}
+                 :change [:assoc component-specs]}
+                :when #(nil? (::component-registry/state %)))
+      (doseq [[component-name component-spec] component-specs]
+        (component-registry/reg-component !db component-name component-spec))))
   nil)
 
 (defn reg-attr-writers
   {:arglists '[[!db & keyvals] [& keyvals]]}
   [& args]
   (let [[!db keyvals] (resolve-db-keyvals-args args)]
-    (component-registry/reg-attribute-writers !db (apply array-map keyvals)))
+    (when-not (rstore/patch! !db
+                {:path [::z/state ::pending-attr-writers]
+                 :fnil {}
+                 :change [:assoc keyvals]}
+                :when #(nil? (::component-registry/state %)))
+      (component-registry/reg-attribute-writers !db keyvals)))
   nil)
 
 (defn reg-attr-readers
   {:arglists '[[!db & keyvals] [& keyvals]]}
   [& args]
   (let [[!db keyvals] (resolve-db-keyvals-args args)]
-    (component-registry/reg-attribute-readers !db (apply array-map keyvals)))
+    (when-not (rstore/patch! !db
+                {:path [::z/state ::pending-attr-readers]
+                 :fnil {}
+                 :change [:assoc keyvals]}
+                :when #(nil? (::component-registry/state %)))
+      (component-registry/reg-attribute-readers !db keyvals)))
   nil)
 
 (def ^:private default-opts
@@ -159,13 +173,18 @@
   (update vnode 1
     (fn [props]
       (cond-> props
+        (contains? props :zero.core/class)
+        (->
+          (update :#class (fnil into []) (if (coll? (:zero.core/class props)) (:zero.core/class props) [(:zero.core/class props)]))
+          (dissoc :zero.core/class))
+
         true
         (update-keys
           (fn [k]
             (if (and (keyword? k) (= "zero.core" (namespace k)))
               (keyword (str "#" (name k)))
               k)))
-        
+
         (contains? props :zero.core/internals)
         (update :#internals
           (fn [internals]
@@ -178,10 +197,15 @@
 (defn install!
   [!db & {:as opts}]
   (let [merged-opts (merge default-opts opts)]
-    (when-not (::component-registry/state @!db)
-      (component-registry/install! !db))
+    (component-registry/install! !db :ignore-if-already-installed? true)
 
-    (when (and (:html? merged-opts) (not (::html/state @!db)))
+    (when-let [[old-db _] (rstore/patch! !db {:path [::z/state] :fnil {} :change [:clear ::pending-components ::pending-attr-readers ::pending-attr-writers]})]
+      (component-registry/reg-attribute-readers !db (get-in old-db [::z/state ::pending-attr-readers] {}))
+      (component-registry/reg-attribute-writers !db (get-in old-db [::z/state ::pending-attr-writers] {}))
+      (doseq [[component-name component-spec] (get-in old-db [::z/state ::pending-components])]
+        (component-registry/reg-component !db component-name component-spec)))
+
+    (when (:html? merged-opts)
       (html/install! !db
         :render-listener
         (fn [node-id k v]
@@ -198,21 +222,26 @@
            :ref v])
 
         :preproc-vnode
-        preproc-vnode))
+        preproc-vnode
+
+        :ignore-if-already-installed?
+        true))
 
     #?(:cljs
        (when
          (and
            js/document
            js/customElements
-           (:web-components? merged-opts)
-           (not (::web-components/state @!db)))
-         (web-components/install! !db js/document js/customElements
-           :hot-reload? (:hot-reload? merged-opts)
-           :disable-tags? false
-           :preproc-vnode preproc-vnode
-           :after-render (resolve 'zero.impl.signals/after-render-sig)
-           :before-render (resolve 'zero.impl.signals/before-render-sig))))
+           (:web-components? merged-opts))
+         (let [after-render-sig (resolve 'zero.impl.signals/after-render-sig)
+               before-render-sig (resolve 'zero.impl.signals/before-render-sig)]
+           (web-components/install! !db js/document js/customElements
+             :hot-reload? (:hot-reload? merged-opts)
+             :disable-tags? false
+             :preproc-vnode preproc-vnode
+             :after-render after-render-sig
+             :before-render #(do (before-render-sig) (bnd/flush! !db))
+             :ignore-if-already-installed? true))))
 
     (rstore/patch! !db
       {:path [::z/state ::act/harvest-event]

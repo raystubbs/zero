@@ -2,11 +2,10 @@
   (:require
    [zero.impl.injection :refer [apply-injections]]
    [zero.impl.signals :as sig]
+   [zero.impl.default-db :refer [!default-db]]
    [zero.impl.base :as base]
-   [goog.object :as gobj]
    [subzero.logger :as log]
    [zero.core :as-alias z]
-   [zero.config :as zc]
    [subzero.rstore :as rstore]
    #?(:cljs [subzero.plugins.web-components :refer [IListenValue]]))
   #?(:clj
@@ -38,41 +37,44 @@
         :zero.core/root root
         :subzero.core/db !db})))
 
-(defn- throttle
-  [!db ^Action action actually-perform! kind]
-  (let [{:keys [delta]} (.-props action)
-        
-        [old-db _]
-        (rstore/patch! !db
-          {:path [::z/state ::throttling action :fn]
-           :change [:value actually-perform!]})]
-    (when-not (get-in old-db [::z/state ::throttling action])
-      (let [interval
-            (base/schedule-every
-              (or delta 300)
-              (fn [] 
-                (if-let [perform-fn (get-in @old-db [::z/state ::throttling action :fn])]
-                  (perform-fn)
-                  (when-let [[old-db _]
-                             (rstore/patch! !db
-                               {:path [::z/state ::throttling]
-                                :change [:clear action]}
-                               :when #(nil? (get-in % [::z/state ::throttling action :fn])))]
-                    (base/cancel-scheduled (get-in old-db [::z/state ::throttling action :interval]))))))]
-        (rstore/patch! !db
-          {:path [::z/state ::throttling action :interval]
-           :change [:value interval]})
-        (when (= :throttle kind)
-          (base/schedule 0 actually-perform!))))))
+(declare ^:private throttle)
 
-(defrecord Action [props effects])
+(defrecord Action [props effects]
+  #?@(:clj
+      [IFn
+       (invoke
+         [action context]
+         (.invoke action context !default-db))
+       (invoke
+         [action context !db]
+         (let [{:keys [log? dispatch]} (.-props action)
+
+               actually-perform!
+               (fn actually-perform! []
+                 (doseq [effect (apply-injections !db context (.-effects action))]
+                   (try
+                     (do-effect! !db context effect)
+                     (catch Exception ex
+                       (log/error "Error in effect handler" :ex ex))))
+                 (when log?
+                   (log/info (str action) :data {:context context})))]
+           (case (or dispatch :default)
+             (:throttle :debounce)
+             (throttle !db action actually-perform! dispatch)
+
+             :immediate
+             (actually-perform!)
+
+             :default
+             (base/schedule 0 actually-perform!))
+           nil))]))
 
 #?(:cljs
    (extend-type Action
      IFn
      (-invoke
        ([action context]
-        (-invoke action context zc/!default-db))
+        (action context !default-db))
        ([action context !db]
         (let [{:keys [log? dispatch] :as props} (.-props action)
 
@@ -140,34 +142,31 @@
      IListenValue
      (get-listener-fun
        [action !db]
-       #(action % !db)))
-   
-   :clj
-   (extend-type Action
-     IFn
-     (invoke
-       [action context]
-       (.invoke action context zc/!default-db))
-     (invoke
-       [action context !db]
-       (let [{:keys [log? dispatch]} (.-props action)
-             
-             actually-perform!
-             (fn actually-perform! [] 
-               (doseq [effect (apply-injections !db context (.-effects action))]
-                 (try
-                   (do-effect! !db context effect)
-                   (catch :default ex
-                     (log/error "Error in effect handler" :ex ex))))
-               (when log?
-                 (log/info (str action) :data {:context context})))]
-         (case (or dispatch :default)
-           (:throttle :debounce)
-           (throttle !db action actually-perform! dispatch)
-           
-           :immediate
-           (actually-perform!)
-           
-           :default
-           (base/schedule 0 actually-perform!))
-         nil))))
+       #(action % !db))))
+
+(defn- throttle
+  [!db ^Action action actually-perform! kind]
+  (let [{:keys [delta]} (.-props action)
+        
+        [old-db _]
+        (rstore/patch! !db
+          {:path [::z/state ::throttling action :fn]
+           :change [:value actually-perform!]})]
+    (when-not (get-in old-db [::z/state ::throttling action])
+      (let [interval
+            (base/schedule-every
+              (or delta 300)
+              (fn [] 
+                (if-let [perform-fn (get-in @old-db [::z/state ::throttling action :fn])]
+                  (perform-fn)
+                  (when-let [[old-db _]
+                             (rstore/patch! !db
+                               {:path [::z/state ::throttling]
+                                :change [:clear action]}
+                               :when #(nil? (get-in % [::z/state ::throttling action :fn])))]
+                    (base/cancel-scheduled (get-in old-db [::z/state ::throttling action :interval]))))))]
+        (rstore/patch! !db
+          {:path [::z/state ::throttling action :interval]
+           :change [:value interval]})
+        (when (= :throttle kind)
+          (base/schedule 0 actually-perform!))))))

@@ -54,7 +54,6 @@
   [m [k & ks]]
   (if (seq ks)
     (let [new (dissoc-in (get m k) ks)]
-      (prn new)
       (if (seq new)
         (assoc m k new)
         (dissoc m k)))
@@ -80,15 +79,15 @@
      (defonce ^:private timer (Timer.))
      
      (defn schedule
-       [^long delay f & args]
+       [delay f & args]
        (let [tt (proxy [TimerTask] [] (run [] (apply f args)))]
-         (.schedule timer delay)
+         (.schedule timer ^long delay)
          tt))
      
      (defn schedule-every
-       [^long delay f & args]
+       [delay f & args]
        (let [tt (proxy [TimerTask] [] (run [] (apply f args)))]
-         (.schedule timer delay delay)
+         (.schedule timer ^long delay ^long delay)
          tt))
      
      (defn cancel-scheduled
