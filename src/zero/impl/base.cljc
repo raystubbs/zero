@@ -1,4 +1,6 @@
-(ns ^:no-doc zero.impl.base 
+(ns ^:no-doc zero.impl.base
+  (:require
+    [subzero.logger :as log])
   #?(:clj
      (:import
       (clojure.lang Named)
@@ -103,3 +105,51 @@
        #js{:apply
            (fn [target _ args]
              (apply target args))})))
+
+(defn convert-patch "
+Convert from legacy zero.extras.db/patch! format to subzero.rstore/patch!
+format for any changes not in the correct format.
+"
+  [patch]
+  (cond
+    (and (map? patch) (contains? patch :subpatch) (contains? patch :change))
+    patch
+
+    (map? patch)
+    (cond->
+      (cond
+        (ifn? (:fn patch))
+        {:path (:path patch)
+         :change (into [:call (:fn patch)] (:args patch))}
+
+        (map? (:merge patch))
+        {:path (:path patch)
+         :change [:assoc (:merge patch)]}
+
+        (coll? (:clear patch))
+        {:path (:path patch)
+         :change (into [:clear] (:clear patch))}
+
+        (contains? patch :conj)
+        {:path (:path patch)
+         :change (into [:conj (:conj patch)])}
+
+        (coll? (:into patch))
+        {:path (:path patch)
+         :change [:into (:into patch)]}
+
+        (coll? (:patch patch))
+        {:path (:path patch)
+         :subpatch (convert-patch (:patch patch))}
+
+        :else
+        {:path (:path patch)
+         :change [:value (:value patch)]})
+      (contains? patch :fnil)
+      (assoc :fnil (:fnil patch)))
+
+    (sequential? patch)
+    (mapv convert-patch patch)
+
+    :else
+    (throw (ex-info "Invalid patch" {:patch patch}))))

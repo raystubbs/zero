@@ -139,13 +139,14 @@
                                  :change [:value new-kill-fn]}])]
               (when-let [old-kill-fn (get-in old-db [::z/state ::stream-states stream-ident :kill-fn])]
                 (old-kill-fn))
-              (when-not (= @!tmp-pending ::none)
-                (locking !tmp-pending
+
+              (locking !rx-fn
+                (when-not (= @!tmp-pending ::none)
                   (rstore/patch! !db
                     {:path [::z/state ::pending-stream-values stream-ident]
                      :change [:value @!tmp-pending]})
-                  (reset! !rx-fn (rx-fn !db stream-ident)))
-                (schedule-flush! !db)))))))
+                  (schedule-flush! !db))
+                (reset! !rx-fn (rx-fn !db stream-ident))))))))
     (fn [ex]
       (log/error "Error booting stream"
         :data {:key key :args args}

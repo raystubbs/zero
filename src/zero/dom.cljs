@@ -1,14 +1,15 @@
 (ns zero.dom
   (:require
-   [zero.impl.base :refer [IDisposable dispose!]]
-   [zero.config :as zc]
-   [zero.core :as z]
-   [zero.impl.signals :as sig]
-   [subzero.core :as sz]
-   [subzero.rstore :as rstore]
-   [subzero.plugins.web-components :as web-components]
-   [clojure.string :as str]
-   [goog.object :as gobj]))
+    [zero.impl.base :as base]
+    [zero.impl.base :refer [IDisposable dispose!]]
+    [zero.config :as zc]
+    [zero.core :as z]
+    [zero.impl.signals :as sig]
+    [subzero.core :as sz]
+    [subzero.rstore :as rstore]
+    [subzero.plugins.web-components :as web-components]
+    [clojure.string :as str]
+    [goog.object :as gobj]))
 
 (defonce ^:private internal-state-sym (js/Symbol "zInternalState"))
 
@@ -75,7 +76,7 @@
 
 (defn patch-internal-state!
   [^js/HTMLElement element patch]
-  (rstore/patch! (get-internal-state! element {}) patch))
+  (rstore/patch! (get-internal-state! element {}) (base/convert-patch patch)))
 
 (defn listen-view
   [!db {:keys [sel evt] action :act :as props {!mut :mut} :state}]
