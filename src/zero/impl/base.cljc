@@ -112,7 +112,7 @@ format for any changes not in the correct format.
 "
   [patch]
   (cond
-    (and (map? patch) (contains? patch :subpatch) (contains? patch :change))
+    (and (map? patch) (or (contains? patch :subpatch) (contains? patch :change)))
     patch
 
     (map? patch)

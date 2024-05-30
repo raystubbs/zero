@@ -28,13 +28,14 @@
            ^js host (when (instance? js/ShadowRoot root) (.-host root))
            harvest-event (get-in @!db [::z/state ::harvest-event])
            data (harvest-event ev)]
-       {:zero.core/event.data data
+       {:zero.core/event.data data ;; deprecated
         :zero.core/event.target (.-target ev)
         :zero.core/event.current (.-currentTarget ev) ;; deprecated
         :zero.core/event ev
         :zero.core/current (.-currentTarget ev)
         :zero.core/host host
         :zero.core/root root
+        :zero.core/data data
         :subzero.core/db !db})))
 
 (declare ^:private throttle)
