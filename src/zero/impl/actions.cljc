@@ -154,20 +154,23 @@
           {:path [::z/state ::throttling action :fn]
            :change [:value actually-perform!]})]
     (when-not (get-in old-db [::z/state ::throttling action])
-      (let [interval
-            (base/schedule-every
-              (or delta 300)
-              (fn [] 
-                (if-let [perform-fn (get-in @old-db [::z/state ::throttling action :fn])]
+      (let [tick-fn
+            (fn tick-fn []
+              (let [[old-db _] (rstore/patch! !db
+                                 {:path [::z/state ::throttling action]
+                                  :change [:clear :fn]})]
+                (if-let [perform-fn (get-in old-db [::z/state ::throttling action :fn])]
                   (perform-fn)
                   (when-let [[old-db _]
                              (rstore/patch! !db
                                {:path [::z/state ::throttling]
                                 :change [:clear action]}
                                :when #(nil? (get-in % [::z/state ::throttling action :fn])))]
-                    (base/cancel-scheduled (get-in old-db [::z/state ::throttling action :interval]))))))]
+                    (base/cancel-scheduled (get-in old-db [::z/state ::throttling action :interval]))))))
+
+            interval (base/schedule-every (or delta 300) tick-fn)]
         (rstore/patch! !db
           {:path [::z/state ::throttling action :interval]
            :change [:value interval]})
         (when (= :throttle kind)
-          (base/schedule 0 actually-perform!))))))
+          (tick-fn))))))

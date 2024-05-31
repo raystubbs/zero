@@ -229,6 +229,13 @@ for a component with this name.
       (apply << ::<< args))
     {::injector-fn true}))
 
+(def ^{:arglists '[[f & args]]}
+  <<call
+  (with-meta
+    (fn <<call [f & args]
+      (apply << ::call f args))
+    {::injector-fn true}))
+
 (zc/reg-effects
   ::choose
   (with-meta
@@ -248,7 +255,11 @@ for a component with this name.
 
   ::<<
   (fn [_ & args]
-    (apply << args)))
+    (apply << args))
+
+  ::call
+  (fn [_ f & args]
+    (apply f args)))
 
 (defn inject
   ([context form]
