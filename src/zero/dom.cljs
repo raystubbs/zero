@@ -145,7 +145,7 @@
                 (resolve (apply f args)))))
           
           (nil :none)
-          (apply f args))
+          (resolve (apply f args)))
         (catch :default ex
           (reject ex))))))
 
