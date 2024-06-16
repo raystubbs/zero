@@ -6,8 +6,7 @@
    [zero.core :as-alias z]
    [subzero.core :as-alias sz]
    [subzero.logger :as log]
-   [subzero.rstore :as rstore]
-   #?(:cljs [subzero.plugins.web-components :refer [IBindValue]]))
+   [subzero.rstore :as rstore])
   #?(:clj
      (:import
       [clojure.lang IDeref IRef IFn])))
@@ -233,9 +232,4 @@
      IFn
      (-invoke
        ([bnd !db]
-        (get-ref !db bnd)))
-
-     IBindValue
-     (get-bind-watchable
-       [bnd !db]
-       (get-ref !db bnd))))
+        (get-ref !db bnd)))))

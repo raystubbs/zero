@@ -1,57 +1,16 @@
 (ns zero.config
   (:require
    [subzero.rstore :as rstore]
-   [zero.core :as-alias z]
+   [zero.core :as z]
    [zero.impl.default-db :as default-db]
    [zero.impl.bindings :as bnd]
    [zero.impl.signals :as sig]
-   [zero.impl.actions :as-alias act]
+   [zero.impl.actions :as act]
    [zero.impl.injection :as-alias inj]
    [subzero.plugins.component-registry :as component-registry]
-   [subzero.plugins.html :as html]
-   #?(:cljs [subzero.plugins.web-components :as web-components])))
+   [subzero.plugins.html :as html]))
 
 (def !default-db default-db/!default-db)
-
-#?(:cljs
-   (defn default-event-harvester [^js/Event event]
-     (case (.-type event)
-       ("keyup" "keydown" "keypress")
-       {:key (.-key event)
-        :code (.-code event)
-        :mods (cond-> #{}
-                (.-altKey event) (conj :alt)
-                (.-shiftKey event) (conj :shift)
-                (.-ctrlKey event) (conj :ctrl)
-                (.-metaKey event) (conj :meta))}
-
-       ("input" "change")
-       (let [target (.-target event)]
-         (when (or (instance? js/HTMLInputElement target) (instance? js/HTMLTextAreaElement target))
-           (case (.-type target)
-             "checkbox"
-             (.-checked target)
-
-             "file"
-             (-> target .-files array-seq vec)
-
-             (.-value target))))
-
-       "submit"
-       (let [target (.-target event)]
-         (when (instance? js/HTMLFormElement target)
-           (js/FormData. target)))
-
-       ("drop")
-       (->> event .-dataTransfer .-items array-seq
-         (mapv #(if (= "file" (.-kind %)) (.getAsFile %) (js/Blob. [(.getAsString %)] #js{:type (.-type %)}))))
-
-       ;; TODO: others
-
-       (or
-         (.-detail event)
-         ;; TODO: others
-         ))))
 
 (defn- resolve-db-keyvals-args
   [args]
@@ -163,10 +122,7 @@
   nil)
 
 (def ^:private default-opts
-  {:html? true
-   :web-components? true
-   :hot-reload? true
-   :harvest-event #?(:cljs default-event-harvester :clj nil)})
+  {:html? true})
 
 (defn- preproc-vnode
   [vnode]
@@ -225,25 +181,30 @@
         preproc-vnode
 
         :ignore-if-already-installed?
-        true))
-
-    #?(:cljs
-       (when
-         (and
-           js/document
-           js/customElements
-           (:web-components? merged-opts))
-         (let [after-render-sig (resolve 'zero.impl.signals/after-render-sig)
-               before-render-sig (resolve 'zero.impl.signals/before-render-sig)]
-           (web-components/install! !db js/document js/customElements
-             :hot-reload? (:hot-reload? merged-opts)
-             :disable-tags? false
-             :preproc-vnode preproc-vnode
-             :after-render after-render-sig
-             :before-render #(do (before-render-sig) (bnd/flush! !db))
-             :ignore-if-already-installed? true))))
-
-    (rstore/patch! !db
-      {:path [::z/state ::act/harvest-event]
-       :change [:value (:harvest-event merged-opts)]}))
+        true)))
   nil)
+
+(reg-effects
+  :zero.core/choose
+  (with-meta
+    (fn [ctx f & args]
+      (doseq [effect (apply f args)]
+        (act/do-effect! (::sz/db ctx) ctx effect)))
+    {::contextual true}))
+
+(reg-injections
+  :zero.core/ctx
+  (fn [ctx & path]
+    (get-in ctx path))
+
+  :zero.core/act
+  (fn [_ & args]
+    (apply z/act args))
+
+  :zero.core/<<
+  (fn [_ & args]
+    (apply z/<< args))
+
+  :zero.core/call
+  (fn [_ f & args]
+    (apply f args)))

@@ -6,8 +6,7 @@
    [zero.impl.base :as base]
    [subzero.logger :as log]
    [zero.core :as-alias z]
-   [subzero.rstore :as rstore]
-   #?(:cljs [subzero.plugins.web-components :refer [IListenValue]]))
+   [subzero.rstore :as rstore])
   #?(:clj
      (:import
       [clojure.lang IFn])))
@@ -138,12 +137,7 @@
 
             :default
             (js/setTimeout actually-perform!))
-          nil)))
-
-     IListenValue
-     (get-listener-fun
-       [action !db]
-       #(action % !db))))
+          nil)))))
 
 (defn- throttle
   [!db ^Action action actually-perform! kind]

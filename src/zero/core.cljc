@@ -1,6 +1,6 @@
 (ns zero.core
   (:require
-    [zero.config :as zc]
+    [zero.impl.default-db :refer [!default-db]]
     [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
     [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
     [zero.impl.injection #?@(:cljs [:refer [Injection]]) :as inj]
@@ -236,34 +236,9 @@ for a component with this name.
       (apply << ::call f args))
     {::injector-fn true}))
 
-(zc/reg-effects
-  ::choose
-  (with-meta
-    (fn [ctx f & args]
-      (doseq [effect (apply f args)]
-        (act/do-effect! (::sz/db ctx) ctx effect)))
-    {::contextual true}))
-
-(zc/reg-injections
-  ::ctx
-  (fn [ctx & path]
-    (get-in ctx path))
-
-  ::act
-  (fn [_ & args]
-    (apply act args))
-
-  ::<<
-  (fn [_ & args]
-    (apply << args))
-
-  ::call
-  (fn [_ f & args]
-    (apply f args)))
-
 (defn inject
   ([context form]
-   (inject zc/!default-db context form))
+   (inject !default-db context form))
   ([!db context form]
    (inj/apply-injections !db context form)))
 

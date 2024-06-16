@@ -1,5 +1,5 @@
 {:paths ["src"]
- :deps {io.github.raystubbs/subzero {:git/sha "53f4e9d4eecb8865b00c6482f94c885adc5fdc1f"}}
+ :deps {io.github.raystubbs/subzero {:git/sha "0f2d598631a65074e13eabe883d0a0159c464329"}}
 
  :aliases
  {:dev

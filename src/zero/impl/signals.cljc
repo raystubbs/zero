@@ -1,11 +1,10 @@
 (ns ^:no-doc zero.impl.signals
   (:require
-    [subzero.logger :as log]
-    [zero.impl.base :refer [dissoc-in]]
-    [zero.impl.default-db :refer [!default-db]]
-    [zero.core :as-alias z]
-    [subzero.rstore :as rstore]
-    #?(:cljs [subzero.plugins.web-components :refer [IListenKey]]))
+   [subzero.logger :as log]
+   [zero.impl.base :refer [dissoc-in]]
+   [zero.impl.default-db :refer [!default-db]]
+   [zero.core :as-alias z]
+   [subzero.rstore :as rstore])
   #?(:clj
      (:import
       (clojure.lang IFn))))
@@ -50,15 +49,7 @@
           (f))
         nil)
        ([sig]
-        (sig !default-db)))
-
-     IListenKey
-     (listen
-       [sig !db target listener-fun]
-       (zero.impl.signals/listen !db sig [sig target] listener-fun))
-     (unlisten
-       [sig !db target]
-       (zero.impl.signals/unlisten !db sig [sig target]))))
+        (sig !default-db)))))
 
 
 (def ^:no-doc after-render-sig (Signal. ::z/after-render))
