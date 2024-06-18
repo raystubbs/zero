@@ -8,7 +8,8 @@
    [zero.impl.actions :as act]
    [zero.impl.injection :as-alias inj]
    [subzero.plugins.component-registry :as component-registry]
-   [subzero.plugins.html :as html]))
+   [subzero.plugins.html :as html]
+   [zero.cdf :as cdf]))
 
 (def !default-db default-db/!default-db)
 
@@ -94,31 +95,9 @@
                  :change [:assoc component-specs]}
                 :when #(nil? (::component-registry/state %)))
       (doseq [[component-name component-spec] component-specs]
-        (component-registry/reg-component !db component-name component-spec))))
-  nil)
-
-(defn reg-attr-writers
-  {:arglists '[[!db & keyvals] [& keyvals]]}
-  [& args]
-  (let [[!db keyvals] (resolve-db-keyvals-args args)]
-    (when-not (rstore/patch! !db
-                {:path [::z/state ::pending-attr-writers]
-                 :fnil {}
-                 :change [:assoc keyvals]}
-                :when #(nil? (::component-registry/state %)))
-      (component-registry/reg-attribute-writers !db keyvals)))
-  nil)
-
-(defn reg-attr-readers
-  {:arglists '[[!db & keyvals] [& keyvals]]}
-  [& args]
-  (let [[!db keyvals] (resolve-db-keyvals-args args)]
-    (when-not (rstore/patch! !db
-                {:path [::z/state ::pending-attr-readers]
-                 :fnil {}
-                 :change [:assoc keyvals]}
-                :when #(nil? (::component-registry/state %)))
-      (component-registry/reg-attribute-readers !db keyvals)))
+        (component-registry/reg-component !db component-name component-spec)
+        (component-registry/reg-attribute-readers !db component-name (get-in @!db [::z/state ::attr-reader]))
+        (component-registry/reg-attribute-writers !db component-name (get-in @!db [::z/state ::attr-writer])))))
   nil)
 
 (def ^:private default-opts
@@ -152,14 +131,19 @@
 
 (defn install!
   [!db & {:as opts}]
-  (let [merged-opts (merge default-opts opts)]
+  (let [merged-opts (merge default-opts opts)
+        attr-writer (fn zero-attr-writer [v _ _]
+                      (when v
+                        (cdf/write-str v :mapper (or (:cdf-mapper opts) cdf/default-mapper))))
+        attr-reader (fn zero-attr-reader [s _ _]
+                      (cdf/read-str s :operators (or (:cdf-operators opts) cdf/default-operators)))]
     (component-registry/install! !db :ignore-if-already-installed? true)
 
     (when-let [[old-db _] (rstore/patch! !db {:path [::z/state] :fnil {} :change [:clear ::pending-components ::pending-attr-readers ::pending-attr-writers]})]
-      (component-registry/reg-attribute-readers !db (get-in old-db [::z/state ::pending-attr-readers] {}))
-      (component-registry/reg-attribute-writers !db (get-in old-db [::z/state ::pending-attr-writers] {}))
       (doseq [[component-name component-spec] (get-in old-db [::z/state ::pending-components])]
-        (component-registry/reg-component !db component-name component-spec)))
+        (component-registry/reg-component !db component-name component-spec)
+        (component-registry/reg-attribute-writers !db component-name attr-writer)
+        (component-registry/reg-attribute-readers !db component-name attr-reader)))
 
     (when (:html? merged-opts)
       (html/install! !db
@@ -181,7 +165,13 @@
         preproc-vnode
 
         :ignore-if-already-installed?
-        true)))
+        true))
+
+    (rstore/patch! !db
+      [{:path [::z/state ::attr-reader]
+        :change [:value attr-reader]}
+       {:path [::z/state ::attr-writer]
+        :change [:value attr-writer]}]))
   nil)
 
 (reg-effects
@@ -189,8 +179,8 @@
   (with-meta
     (fn [ctx f & args]
       (doseq [effect (apply f args)]
-        (act/do-effect! (::sz/db ctx) ctx effect)))
-    {::contextual true}))
+        (act/do-effect! (::z/db ctx) ctx effect)))
+    {::z/contextual true}))
 
 (reg-injections
   :zero.core/ctx

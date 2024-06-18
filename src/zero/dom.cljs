@@ -1,5 +1,6 @@
 (ns zero.dom
   (:require
+    [subzero.logger :as log]
     [zero.impl.base :as base]
     [zero.impl.base :refer [IDisposable dispose!]]
     [zero.config :as zc]
@@ -7,7 +8,7 @@
     [zero.impl.signals :as sig]
     [subzero.core :as sz]
     [subzero.rstore :as rstore]
-    [subzero.plugins.web-components :as web-components]
+    [subzero.plugins.web-components :refer [IListenValue IBindValue] :as web-components]
     [clojure.string :as str]
     [goog.object :as gobj]))
 
@@ -90,12 +91,15 @@
      :#style {:display :none}
      :#on {:render
            (fn [^js/Event ev]
-             (let [target (.querySelector (.getRootNode (.-target ev)) (z/css-selector sel))]
+             (let [target (.querySelector (.getRootNode (.-host (.-target ev))) (z/css-selector sel))]
                (when-let [{:keys [old-props old-target]} @!mut]
                  (when-not (and (= old-props props) (= old-target target))
                    (web-components/unlisten (:evt old-props) !db old-target)))
                (when target
-                 (web-components/listen evt !db target action)
+                 (web-components/listen evt !db target
+                   (if (satisfies? IListenValue action)
+                     (web-components/get-listener-fun action !db)
+                     action))
                  (swap! !mut assoc :old-props props :old-target target))))
 
            :disconnect
@@ -109,14 +113,17 @@
    :#style {:display :none}
    :#on {:render
          (fn [^js/Event ev]
-           (let [target (.querySelector (.getRootNode (.-target ev)) (z/css-selector sel))]
+           (let [target (.querySelector (.getRootNode (.-host (.-target ev))) (z/css-selector sel))]
              (when-let [{:keys [old-props old-target]} @!mut]
                (when-not (and (= old-props props) (= old-target target))
                  (web-components/unbind (:prop old-props) !db old-target)))
              (when target
-               (web-components/bind prop !db target ref)
+               (web-components/bind prop !db target
+                 (if (satisfies? IBindValue ref)
+                   (web-components/get-bind-watchable ref !db)
+                   ref))
                (swap! !mut assoc :old-props props :old-target target))))
-  
+
          :disconnect
          (fn [_]
            (when-let [{:keys [old-props old-target]} @!mut]
@@ -135,7 +142,7 @@
               (fn []
                 (sig/unlisten !db after-render-sig k)
                 (resolve (apply f args)))))
-          
+
           :before-render
           (let [k (gensym)
                 before-render-sig (z/sig ::z/before-render)]
@@ -150,7 +157,7 @@
           (reject ex))))))
 
 (defn select-one
-  [{^js/Node root ::z/root !db ::sz/db}
+  [{^js/Node root ::z/root !db ::z/db}
    selector
    & {:keys [deep? delay]}]
   (letfn [(select-fn
@@ -166,7 +173,7 @@
     (delayed !db delay select-fn root)))
 
 (defn select-all
-  [{^js/Node root ::z/root !db ::sz/db}
+  [{^js/Node root ::z/root !db ::z/db}
    selector
    & {:keys [deep? delay]}]
   (letfn [(select-fn
@@ -182,7 +189,7 @@
     (delayed !db delay select-fn root)))
 
 (defn select-closest
-  [{^js/Node root ::z/root ^js/Node current ::z/current !db ::sz/db}
+  [{^js/Node root ::z/root ^js/Node current ::z/current !db ::z/db}
    selector
    & {:keys [breach? delay]}]
   (letfn [(select-fn

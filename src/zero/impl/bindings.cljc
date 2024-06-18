@@ -122,7 +122,7 @@
                             {:stream-key stream-key})))
             kill-fn (apply stream-fn
                       (rx-fn !db stream-ident)
-                      (apply-injections !db {::sz/db !db} args))]
+                      (apply-injections !db {::z/db !db} args))]
         (rstore/patch! !db
           {:path [::z/state ::stream-states stream-ident :kill-fn]
            :change [:value kill-fn]})
@@ -132,7 +132,7 @@
                   !rx-fn (atom #(reset! !tmp-pending %))
                   new-kill-fn (apply new-stream-fn
                                 #(@!rx-fn %)
-                                (apply-injections !db {::sz/db !db} args))
+                                (apply-injections !db {::z/db !db} args))
                   [old-db _] (rstore/patch! !db
                                [{:path [::z/state ::stream-states stream-ident :kill-fn]
                                  :change [:value new-kill-fn]}])]

@@ -63,7 +63,7 @@ when called.
   (let [[props effects] (if (map? (first things))
                           [(first things) (rest things)]
                           [{} things])]
-    (base/callable (Action. props (filterv some? effects)))))
+    (Action. props (filterv some? effects))))
 
 (defn bnd "
 Construct a binding.
@@ -87,7 +87,7 @@ to be held on to.
   (let [[props stream-key args] (if (map? (first things))
                                   [(first things) (second things) (nthrest things 2)]
                                   [{} (first things) (rest things)])]
-    (base/callable (Binding. props stream-key (vec args)))))
+    (Binding. props stream-key (vec args))))
 
 (def ^{:arglists '[[injection-key & args]]}
   << "
@@ -136,7 +136,7 @@ external happenstance.
     ;; elsewhere
     (my-sig)
 " [k]
-  (base/callable (Signal. k)))
+  (Signal. k))
 
 (defn element-name "
 Given a keyword, returns the custom element name that'll be generated
@@ -162,7 +162,7 @@ for a component with this name.
 
 (defn inj->map
   [^Injection inj]
-  {:key (.-injector-key inj) :args (.-args inj)})
+  {:key (.-key inj) :args (.-args inj)})
 
 (defn map->inj
   [m]
@@ -174,7 +174,7 @@ for a component with this name.
 
 (defn bnd->map
   [^Binding bnd]
-  {:key (.-stream-key bnd) :props (.-props bnd) :args (.-args bnd)})
+  {:key (.-key bnd) :props (.-props bnd) :args (.-args bnd)})
 
 (defn map->bnd
   [m]

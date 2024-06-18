@@ -1,4 +1,4 @@
-(ns zero.extras.cdf
+(ns zero.cdf
   (:require
    [clojure.string :as str]
    [zero.core :as z]

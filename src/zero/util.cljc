@@ -1,4 +1,4 @@
-(ns zero.extras.util
+(ns zero.util
   (:require 
    [zero.impl.base :refer [try-catch try-deref]]
    [subzero.logger :as log]))

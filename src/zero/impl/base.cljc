@@ -96,16 +96,6 @@
        [^TimerTask handle]
        (.cancel handle))))
 
-#?(:clj
-   (defn callable [x] x)
-   
-   :cljs
-   (defn callable [x]
-     (js* "new Proxy(~{}, ~{})" x
-       #js{:apply
-           (fn [target _ args]
-             (apply target args))})))
-
 (defn convert-patch "
 Convert from legacy zero.extras.db/patch! format to subzero.rstore/patch!
 format for any changes not in the correct format.

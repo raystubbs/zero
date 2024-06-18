@@ -35,7 +35,7 @@
         :zero.core/host host
         :zero.core/root root
         :zero.core/data data
-        :subzero.core/db !db})))
+        :zero.core/db !db})))
 
 (declare ^:private throttle)
 
@@ -89,7 +89,7 @@
                   (event->context !db context))
 
                 :else
-                (merge {:subzero.core/db !db} context))
+                (merge {:zero.core/db !db} context))
 
               actually-perform!
               (fn actually-perform! []
