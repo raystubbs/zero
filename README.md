@@ -3,6 +3,16 @@
 ![Test Badge](https://github.com/raystubbs/zero/actions/workflows/ci.yml/badge.svg)
 [![cljdoc badge](https://cljdoc.org/badge/me.raystubbs/zero)](https://cljdoc.org/d/me.raystubbs/zero)
 
+> [!WARNING]
+> Zero is undergoing some major changes behind the scenes, including:
+> 
+> - Change to use [subzero](https://github.com/raystubbs/subzero) for web component implementation
+> - Change of focus from web component impl to state management + utilities on top of subzero
+> 
+> I'd recommend against using it in the meantime.  Lot's of breaking changes are incoming.
+> Use [subzero](https://github.com/raystubbs/subzero) directly if you'd like to build
+> web components in ClojureScript.  Its API isn't likely to change much.
+
 # Zero
 A toolkit for building web components in Clojure and ClojureScript.
 
