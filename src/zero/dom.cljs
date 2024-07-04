@@ -131,30 +131,29 @@
 
 (defn- delayed
   [!db delay f & args]
-  (js/Promise.
-    (fn [resolve reject]
-      (try
-        (case delay
-          :after-render
-          (let [k (gensym)
-                after-render-sig (z/sig ::z/after-render)]
-            (sig/listen !db after-render-sig k
-              (fn []
-                (sig/unlisten !db after-render-sig k)
-                (resolve (apply f args)))))
+  (if (nil? delay)
+    (apply f args)
+    (js/Promise.
+      (fn [resolve reject]
+        (try
+          (case delay
+            :after-render
+            (let [k (gensym)
+                  after-render-sig (z/sig ::z/after-render)]
+              (sig/listen !db after-render-sig k
+                (fn []
+                  (sig/unlisten !db after-render-sig k)
+                  (resolve (apply f args)))))
 
-          :before-render
-          (let [k (gensym)
-                before-render-sig (z/sig ::z/before-render)]
-            (sig/listen !db before-render-sig k
-              (fn []
-                (sig/unlisten !db before-render-sig k)
-                (resolve (apply f args)))))
-          
-          (nil :none)
-          (resolve (apply f args)))
-        (catch :default ex
-          (reject ex))))))
+            :before-render
+            (let [k (gensym)
+                  before-render-sig (z/sig ::z/before-render)]
+              (sig/listen !db before-render-sig k
+                (fn []
+                  (sig/unlisten !db before-render-sig k)
+                  (resolve (apply f args))))))
+          (catch :default ex
+            (reject ex)))))))
 
 (defn select-one
   [{^js/Node root ::z/root !db ::z/db}
