@@ -129,6 +129,36 @@
                   (keyword (str "#" (name k)))
                   k)))))))))
 
+(defn- add-registrations!
+  [!db]
+  (reg-effects !db
+    :zero.core/choose
+    (with-meta
+      (fn [ctx f & args]
+        (doseq [effect (apply f args)]
+          (act/do-effect! (::z/db ctx) ctx effect)))
+      {::z/contextual true}))
+
+  (reg-injections !db
+    :zero.core/ctx
+    (fn [ctx & path]
+      (get-in ctx path))
+
+    :zero.core/act
+    (fn [_ & args]
+      (apply z/act args))
+
+    :zero.core/<<
+    (fn [_ & args]
+      (apply z/<< args))
+
+    :zero.core/call
+    (fn [_ f & args]
+      (apply f args)))
+
+  (component-registry/reg-attribute-writers !db :zero.dom/* (-> @!db ::z/state ::attr-writer))
+  (component-registry/reg-attribute-readers !db :zero.dom/* (-> @!db ::z/state ::attr-reader)))
+
 (defn install!
   [!db & {:as opts}]
   (let [merged-opts (merge default-opts opts)
@@ -171,30 +201,6 @@
       [{:path [::z/state ::attr-reader]
         :change [:value attr-reader]}
        {:path [::z/state ::attr-writer]
-        :change [:value attr-writer]}]))
+        :change [:value attr-writer]}])
+    (add-registrations! !db))
   nil)
-
-(reg-effects
-  :zero.core/choose
-  (with-meta
-    (fn [ctx f & args]
-      (doseq [effect (apply f args)]
-        (act/do-effect! (::z/db ctx) ctx effect)))
-    {::z/contextual true}))
-
-(reg-injections
-  :zero.core/ctx
-  (fn [ctx & path]
-    (get-in ctx path))
-
-  :zero.core/act
-  (fn [_ & args]
-    (apply z/act args))
-
-  :zero.core/<<
-  (fn [_ & args]
-    (apply z/<< args))
-
-  :zero.core/call
-  (fn [_ f & args]
-    (apply f args)))
