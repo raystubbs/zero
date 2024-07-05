@@ -158,7 +158,7 @@
 (defn select-one
   [{^js/Node root ::z/root !db ::z/db}
    selector
-   & {:keys [deep? delay]}]
+   & {:keys [deep? delay from]}]
   (letfn [(select-fn
             [^js/Node root]
             (or
@@ -169,12 +169,14 @@
                     (when-let [inner-root (.-shadowRoot node)]
                       (select-fn inner-root)))
                   (array-seq (.-childNodes root))))))]
-    (delayed !db delay select-fn root)))
+    (if (instance? js/Promise from)
+      (-> ^js/Promise from (.then #(delayed !db delay select-fn %)))
+      (delayed !db delay select-fn (or from root)))))
 
 (defn select-all
   [{^js/Node root ::z/root !db ::z/db}
    selector
-   & {:keys [deep? delay]}]
+   & {:keys [deep? delay from]}]
   (letfn [(select-fn
             [^js/Node root]
             (concat
@@ -185,12 +187,14 @@
                     (when-let [inner-root (.-shadowRoot node)]
                       (select-fn inner-root)))
                   (array-seq (.-childNodes root))))))]
-    (delayed !db delay select-fn root)))
+    (if (instance? js/Promise from)
+      (-> ^js/Promise from (.then #(delayed !db delay select-fn %)))
+      (delayed !db delay select-fn (or from root)))))
 
 (defn select-closest
   [{^js/Node root ::z/root ^js/Node current ::z/current !db ::z/db}
    selector
-   & {:keys [breach? delay]}]
+   & {:keys [breach? delay from]}]
   (letfn [(select-fn
             [^js/Node root ^js/Node current]
             (or
@@ -200,7 +204,15 @@
                   (let [new-current (.-host root)
                         new-root (.getRootNode new-current)]
                     (select-fn new-root new-current))))))]
-    (delayed !db delay select-fn root current)))
+    (if (instance? js/Promise from)
+      (-> ^js/Promise from (.then #(delayed !db delay select-fn root %)))
+      (delayed !db delay select-fn root (or from current)))))
+
+(defn shadow
+  [_ target]
+  (if (instance? js/Promise target)
+    (-> target (.then #(.-shadowRoot ^js target)))
+    (.-shadowRoot ^js target)))
 
 (defn install!
   [!db]
@@ -211,7 +223,8 @@
   (zc/reg-injections !db
     ::select-one select-one
     ::select-all select-all
-    ::select-closest select-closest)
+    ::select-closest select-closest
+    ::shadow shadow)
   
   (zc/reg-components !db
     ::echo
