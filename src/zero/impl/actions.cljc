@@ -1,6 +1,6 @@
 (ns ^:no-doc zero.impl.actions
   (:require
-   [zero.impl.injection :refer [apply-injections]]
+   [zero.impl.injection :refer [apply-injections CustomInject]]
    [zero.impl.signals :as sig]
    [zero.impl.default-db :refer [!default-db]]
    [zero.impl.base :as base]
@@ -40,6 +40,11 @@
 (declare ^:private throttle)
 
 (defrecord Action [props effects]
+  CustomInject
+  (custom-inject
+    [act _inject]
+    act)
+
   #?@(:clj
       [IFn
        (invoke
