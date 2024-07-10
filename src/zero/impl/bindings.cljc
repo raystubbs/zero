@@ -127,25 +127,26 @@
           {:path [::z/state ::stream-states stream-ident :kill-fn]
            :change [:value kill-fn]})
         (rstore/watch !db [::stream stream-ident] handler-path
-          (fn [_ new-stream-fn _]
-            (let [!tmp-pending (atom ::none)
-                  !rx-fn (atom #(reset! !tmp-pending %))
-                  new-kill-fn (apply new-stream-fn
-                                #(@!rx-fn %)
-                                (apply-injections !db {::z/db !db} args))
-                  [old-db _] (rstore/patch! !db
-                               [{:path [::z/state ::stream-states stream-ident :kill-fn]
-                                 :change [:value new-kill-fn]}])]
-              (when-let [old-kill-fn (get-in old-db [::z/state ::stream-states stream-ident :kill-fn])]
-                (old-kill-fn))
+          (fn [old-stream-fn new-stream-fn]
+            (when (not= old-stream-fn new-stream-fn)
+              (let [!tmp-pending (atom ::none)
+                    !rx-fn (atom #(reset! !tmp-pending %))
+                    new-kill-fn (apply new-stream-fn
+                                  #(@!rx-fn %)
+                                  (apply-injections !db {::z/db !db} args))
+                    [old-db _] (rstore/patch! !db
+                                 [{:path [::z/state ::stream-states stream-ident :kill-fn]
+                                   :change [:value new-kill-fn]}])]
+                (when-let [old-kill-fn (get-in old-db [::z/state ::stream-states stream-ident :kill-fn])]
+                  (old-kill-fn))
 
-              (locking !rx-fn
-                (when-not (= @!tmp-pending ::none)
-                  (rstore/patch! !db
-                    {:path [::z/state ::pending-stream-values stream-ident]
-                     :change [:value @!tmp-pending]})
-                  (schedule-flush! !db))
-                (reset! !rx-fn (rx-fn !db stream-ident))))))))
+                (locking !rx-fn
+                  (when-not (= @!tmp-pending ::none)
+                    (rstore/patch! !db
+                      {:path [::z/state ::pending-stream-values stream-ident]
+                       :change [:value @!tmp-pending]})
+                    (schedule-flush! !db))
+                  (reset! !rx-fn (rx-fn !db stream-ident)))))))))
     (fn [ex]
       (log/error "Error booting stream"
         :data {:key key :args args}
@@ -175,7 +176,7 @@
                 (rstore/patch! !db
                   {:path [::z/state ::stream-states stream-ident :watches [bnd k]]
                    :change [:value f]})]
-            (when (empty? (get-in old-db [::z/state :stream-states stream-ident :watches]))
+            (when (empty? (get-in old-db [::z/state ::stream-states stream-ident :watches]))
               (boot-stream! !db stream-ident)))
           nil)
         
@@ -188,8 +189,8 @@
                    :change [:clear [bnd k]]})]
             (when
               (and
-                (empty? (get-in new-db [::z/state :stream-states stream-ident :watches]))
-                (seq (get-in old-db [::z/state :stream-states stream-ident :watches])))
+                (empty? (get-in new-db [::z/state ::stream-states stream-ident :watches]))
+                (seq (get-in old-db [::z/state ::stream-states stream-ident :watches])))
               (kill-stream! !db stream-ident)))
           nil)]
     #?(:cljs

@@ -4,6 +4,7 @@ Deprecated.  Use SubZero's rstore instead.
   (:refer-clojure :exclude [get])
   (:require
     [zero.config :as zc]
+    [subzero.logger :as log]
     [subzero.rstore :as rstore]
     [zero.impl.base :as base]))
 
@@ -12,12 +13,13 @@ Deprecated.  Use SubZero's rstore instead.
 (zc/reg-streams
   ::path
   (fn [rx path]
-    (rstore/watch !db [::path path] path
-      (fn [_ new-val _]
-        (rx new-val)))
-    (rx (get-in @!db path))
-    (fn db-path-stream-cleanup []
-      (rstore/unwatch !db [::path path]))))
+    (let [watch-key (gensym)]
+      (rstore/watch !db watch-key path
+        (fn [_ new-val _]
+          (rx new-val)))
+      (rx (get-in @!db path))
+      (fn db-path-stream-cleanup []
+        (rstore/unwatch !db watch-key)))))
 
 (defn get
   [path]
