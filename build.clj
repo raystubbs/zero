@@ -3,7 +3,10 @@
    [clojure.tools.build.api :as b]
    [clojure.edn :as edn]
    [clojure.string :as str]
-   [deps-deploy.deps-deploy :as d]))
+   [clojure.java.io :as io]
+   [deps-deploy.deps-deploy :as d])
+  (:import
+    java.io.File))
 
 (def basis (delay (b/create-basis {:project "deps.edn"})))
 
@@ -31,6 +34,7 @@
   (bump 0))
 
 (defn jar [_]
+  (run! io/delete-file (reverse (file-seq (File. "target"))))
   (let [{:keys [version name]} (edn/read-string (slurp "meta.edn"))
         version-str (str/join "." version)
         class-dir "target/classes"]
