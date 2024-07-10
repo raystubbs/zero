@@ -108,7 +108,7 @@
   (update vnode 1
     (fn [props]
       (cond-> props
-        (contains? props :zero.core/class)
+        (some? (:zero.core/class props))
         (->
           (update :#class (fnil into []) (if (coll? (:zero.core/class props)) (:zero.core/class props) [(:zero.core/class props)]))
           (dissoc :zero.core/class))
@@ -120,7 +120,7 @@
               (keyword (str "#" (name k)))
               k)))
 
-        (contains? props :zero.core/internals)
+        (some? (:zero.core/internals props))
         (update :#internals
           (fn [internals]
             (update-keys internals
