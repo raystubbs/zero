@@ -72,7 +72,13 @@
   IListenKey
   (listen
     [sig !db target listener-fun]
-    (zero.impl.signals/listen !db sig [sig target] listener-fun))
+    (zero.impl.signals/listen !db sig [sig target]
+      (fn []
+        (let [root (.getRootNode target)]
+          (listener-fun
+            {::z/current target
+             ::z/root root
+             ::z/host (when (instance? js/ShadowRoot root) (.-host root))})))))
   (unlisten
     [sig !db target]
     (zero.impl.signals/unlisten !db sig [sig target])))

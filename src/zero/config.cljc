@@ -4,7 +4,6 @@
    [zero.core :as z]
    [zero.impl.default-db :as default-db]
    [zero.impl.bindings :as bnd]
-   [zero.impl.signals :as sig]
    [zero.impl.actions :as act]
    [zero.impl.injection :as-alias inj]
    [subzero.plugins.component-registry :as component-registry]
@@ -110,7 +109,7 @@
       (cond-> props
         (some? (:zero.core/class props))
         (->
-          (update :#class (fnil into []) (if (coll? (:zero.core/class props)) (:zero.core/class props) [(:zero.core/class props)]))
+          (update :#class (fnil into []) (map name (if (coll? (:zero.core/class props)) (:zero.core/class props) [(:zero.core/class props)])))
           (dissoc :zero.core/class))
 
         true
