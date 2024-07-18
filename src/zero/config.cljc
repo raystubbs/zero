@@ -109,7 +109,7 @@
       (cond-> props
         (some? (:zero.core/class props))
         (->
-          (update :#class (fnil into []) (map name (if (coll? (:zero.core/class props)) (:zero.core/class props) [(:zero.core/class props)])))
+          (update :#class (fnil into []) (map name (filter some? (if (coll? (:zero.core/class props)) (:zero.core/class props) [(:zero.core/class props)]))))
           (dissoc :zero.core/class))
 
         true
