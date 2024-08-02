@@ -3,7 +3,9 @@
    [clojure.string :as str]
    [zero.core :as z]
    [zero.impl.base :refer [str-writer str-writer->str write]])
-  #?(:clj (:import[java.util ArrayList])))
+  #?(:clj
+     (:import
+       [java.util ArrayList Date])))
 
 #?(:clj (defn- mut-list [] (ArrayList.))
    :cljs (defn- mut-list [] #js[]))
@@ -220,7 +222,8 @@
   {'act z/act
    'bnd z/bnd
    '<<  z/<<
-   'set (fn [& xs] (set xs))})
+   'set (fn [& xs] (set xs))
+   'inst #?(:cljs #(js/Date. %) :clj #(Date. ^String %))})
 
 (defn read-str
   [s & {:as opts}]
@@ -272,6 +275,9 @@
     (z/inj? x)
     (let [{:keys [key args]} (z/inj->map x)]
       (concat ['<< key] args))
+
+    (inst? x)
+    (list 'inst #?(:cljs (.toISOString x) :clj (.toString x)))
 
     :else
     x))
