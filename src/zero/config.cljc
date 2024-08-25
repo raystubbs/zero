@@ -102,32 +102,6 @@
 (def ^:private default-opts
   {:html? true})
 
-(defn- preproc-vnode
-  [vnode]
-  (update vnode 1
-    (fn [props]
-      (cond-> props
-        (some? (:zero.core/class props))
-        (->
-          (update :#class (fnil into []) (map name (filter some? (if (coll? (:zero.core/class props)) (:zero.core/class props) [(:zero.core/class props)]))))
-          (dissoc :zero.core/class))
-
-        true
-        (update-keys
-          (fn [k]
-            (if (and (keyword? k) (= "zero.core" (namespace k)))
-              (keyword (str "#" (name k)))
-              k)))
-
-        (some? (:zero.core/internals props))
-        (update :#internals
-          (fn [internals]
-            (update-keys internals
-              (fn [k]
-                (if (and (keyword? k) (= "zero.core" (namespace k)))
-                  (keyword (str "#" (name k)))
-                  k)))))))))
-
 (defn- add-registrations!
   [!db]
   (reg-effects !db
@@ -189,9 +163,6 @@
            :sel (str "#" node-id)
            :prop k
            :ref v])
-
-        :preproc-vnode
-        preproc-vnode
 
         :ignore-if-already-installed?
         true))

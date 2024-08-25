@@ -1,6 +1,7 @@
 .clj-kondo
 .cpcache
 .lsp
+!.lsp/config.edn
 .vscode
 .calva
 .nrepl-port

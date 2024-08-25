@@ -59,7 +59,6 @@
     (web-components/install! !db js/document js/customElements
       :hot-reload? (:hot-reload? merged-opts)
       :disable-tags? false
-      :preproc-vnode @(resolve 'zero.config/preproc-vnode)
       :after-render after-render-sig
       :before-render #(do (before-render-sig) (bnd/flush! !db))
       :ignore-if-already-installed? true)
