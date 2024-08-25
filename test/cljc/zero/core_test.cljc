@@ -1,4 +1,4 @@
-(ns zero.cljc.core-test
+(ns zero.core-test
   (:require
    [zero.core :refer [<< <<act <<ctx <<<] :as z]
    #?(:clj [clojure.test :refer [deftest is]]

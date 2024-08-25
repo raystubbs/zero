@@ -1,7 +1,13 @@
 {:deps {:aliases [:test-cljs]}
  
  :builds
- {:node-tests
+ {:browser-tests
+  {:target :esm
+   :output-dir "target/browser-tests"
+   :ns-regexp ".+[-]btest$"
+   :modules {:all {:entries [zero.core-btest]}}}
+  
+  :node-tests
   {:target :node-test
-   :ns-regexp "^zero[.]clj[cs][.].+[-]test$"
+   :ns-regexp ".+[-]test$"
    :output-to "target/node-tests.js"}}}

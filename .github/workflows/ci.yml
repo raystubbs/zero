@@ -56,4 +56,4 @@ jobs:
       - name: Run browser tests
         run: yarn test
       - name: Run Clojure tests
-        run: clojure -X:test-clojure
+        run: clojure -X:test-clj
