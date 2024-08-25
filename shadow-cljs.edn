@@ -5,7 +5,7 @@
   {:target :esm
    :output-dir "target/browser-tests"
    :ns-regexp ".+[-]btest$"
-   :modules {:all {:entries [zero.core-btest]}}}
+   :modules {:all {:entries [zero.placeholder-btest]}}}
   
   :node-tests
   {:target :node-test
