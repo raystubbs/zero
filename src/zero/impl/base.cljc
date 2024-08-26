@@ -78,7 +78,7 @@
    
    :clj
    (do
-     (defonce ^:private timer (Timer.))
+     (defonce ^:private timer (Timer. true))
      
      (defn schedule
        [delay f & args]

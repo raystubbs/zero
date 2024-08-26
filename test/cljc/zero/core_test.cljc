@@ -31,12 +31,3 @@
           (is (= ::z/<< inner-key-3))
           (is (= ::k4 (last inner-args-3))))))))
 
-;; timers, agents, etc will prevent the test process from finishing/closing
-#?(:clj
-   (use-fixtures
-     :once
-     (fn [f]
-       (f)
-       (future
-         (Thread/sleep 1000)
-         (System/exit 0)))))
