@@ -13,3 +13,5 @@ node_modules
 pom.xml
 *.pom.asc
 target/
+cljs-runtime/
+test/snapshots/current/

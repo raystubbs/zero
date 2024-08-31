@@ -1,13 +1,13 @@
 (ns zero.core
   (:require
-    [zero.impl.default-db :refer [!default-db]]
-    [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
-    [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
-    [zero.impl.injection #?@(:cljs [:refer [Injection]]) :as inj]
-    [zero.impl.signals #?@(:cljs [:refer [Signal]]) :as sig]
-    [zero.impl.base :as base]
-    [clojure.string :as str]
-    [subzero.core :as sz])
+   [zero.impl.default-db :refer [!default-db]]
+   [zero.impl.actions :as act #?@(:cljs [:refer [Action]])]
+   [zero.impl.bindings #?@(:cljs [:refer [Binding]])]
+   [zero.impl.injection #?@(:cljs [:refer [Injection]]) :as inj]
+   [zero.impl.signals #?@(:cljs [:refer [Signal]]) :as sig]
+   [zero.impl.base :as base]
+   [clojure.string :as str]
+   [subzero.core :as sz])
   #?(:clj
      (:import
       (zero.impl.actions Action)
@@ -32,12 +32,12 @@ Zero will automatically extract an 'action context' from the
 event, which will be a map with the following:
 
 ```clojure
-{:zero.core/event.data (comment \"event-type-dependent data extracted from the event via `zero.config/harvest-event`\")
- :zero.core/event.target (comment \"the event target\")
- :zero.core/event.current (comment \"the current element which the event is being dispatched on\")
- :zero.core/event (comment \"the original event, this will generally be stale\")
- :zero.core/host (comment \"if `:root` is a ShadowRoot, then this will be its host element, otherwise `nil`\")
- :zero.core/root (comment \"the root element of `:current`)}
+:zero.core/data          ;; event data, extracted from original event via default or custom harvester
+:zero.core/event.target  ;; the event target
+:zero.core/current       ;; the element to which the action is attached
+:zero.core/event         ;; the original event, generally stale by this point
+:zero.core/host          ;; generally the component from which the action was rendered
+:zero.core/root          ;; generally the shadow root of the component from which the action was rendered
 ```
 
 The context will be passed to injectors found within the action, which can extract useful info from
@@ -63,7 +63,7 @@ when called.
   (let [[props effects] (if (map? (first things))
                           [(first things) (rest things)]
                           [{} things])]
-    (Action. props (filterv some? effects))))
+    (Action. props (vec (mapcat (fn [fx] (if (or (seq? fx) (nil? fx)) fx [fx])) effects)))))
 
 (defn bnd "
 Construct a binding.
@@ -216,14 +216,14 @@ for a component with this name.
     {::injector-fn true}))
 
 (def ^{:arglists '[[& path]]}
-  <<ctx 
+  <<ctx
   (with-meta
     (fn <<ctx [& path]
       (apply << ::ctx path))
     {::injector-fn true}))
 
 (def ^{:arglists '[[& args]]}
-  <<< 
+  <<<
   (with-meta
     (fn <<< [& args]
       (apply << ::<< args))

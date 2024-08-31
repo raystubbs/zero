@@ -1,0 +1,109 @@
+[:root>
+ :#css
+ ["/node_modules/todomvc-common/base.css"
+  "/node_modules/todomvc-app-css/index.css"]
+ :#style
+ {:display "block"}
+ [:section.todoapp
+  [:header.header
+   [:h1 "todos"]
+   [:input.new-todo
+    :placeholder
+    "What needs to be done?"
+    :autofocus
+    true
+    :value
+    ""
+    :#on
+    {:input
+     {:props {},
+      :effects
+      [[:zero.dom/dispatch
+        :patch
+        :data
+        {:path [:input],
+         :change
+         [:value {:key :zero.core/ctx, :args [:zero.core/data]}]}]]},
+     :keydown
+     {:props {},
+      :effects
+      [[:zero.core/choose
+        {"Enter"
+         [[:zero.dom/dispatch
+           :patch
+           :data
+           [{:path [:items], :change [:conj {:text ""}]}
+            {:path [:input], :change [:value ""]}]]]}
+        {:key :zero.core/ctx, :args [:zero.core/data :key]}]]}}]]
+  [:section.main
+   [:input#toggle-all.toggle-all
+    :type
+    "checkbox"
+    :checked
+    true
+    :#on
+    {:change
+     {:props {},
+      :effects
+      [[:zero.dom/dispatch
+        :patch
+        :data
+        ({:path [:items 0 :completed?], :change [:value false]})]]}}]
+   [:label {:for "toggle-all"} "Mark all as complete"]
+   [:ul.todo-list
+    ([:li
+      :#class
+      ["completed"]
+      [:div.view
+       :#on
+       {:dblclick
+        {:props {},
+         :effects
+         [[:zero.dom/dispatch
+           :patch
+           :data
+           {:path [:items 0 :editing?], :change [:value true]}]
+          [:zero.dom/invoke
+           {:key :zero.core/ctx,
+            :args
+            [:zero.dom/select-one :input.edit :delay :after-render]}
+           "select"]]}}
+       [:input.toggle
+        :type
+        "checkbox"
+        :checked
+        true
+        :#on
+        {:change
+         {:props {},
+          :effects
+          [[:zero.dom/dispatch
+            :patch
+            :data
+            {:path [:items 0 :completed?], :change [:value false]}]]}}]
+       [:label "Foo"]
+       [:button.destroy
+        :#on
+        {:click
+         {:props {},
+          :effects
+          [[:zero.dom/dispatch
+            :patch
+            :data
+            {:path [:items], :change [:clear 0]}]]}}]]])]]
+  [:footer.footer
+   [:span.todo-count [:strong 1] " item " "left"]
+   [:button.clear-completed
+    :#on
+    {:click
+     {:props {},
+      :effects
+      [[:zero.dom/dispatch
+        :patch
+        :data
+        {:path [:items], :change [:value []]}]]}}
+    "Clear completed"]]]
+ [:footer.info
+  [:p "Double-click to edit a todo"]
+  [:p "Created by " [:a {:href "http://github.com/raystubbs"} "Ray"]]
+  [:p "Part of " [:a {:href "http://todomvc.com"} "TodoMVC"]]]]

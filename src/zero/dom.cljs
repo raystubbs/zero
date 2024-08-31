@@ -1,16 +1,16 @@
 (ns zero.dom
   (:require
-    [subzero.logger :as log]
-    [zero.impl.base :as base]
-    [zero.impl.base :refer [IDisposable dispose!]]
-    [zero.config :as zc]
-    [zero.core :as z]
-    [zero.impl.signals :as sig]
-    [subzero.core :as sz]
-    [subzero.rstore :as rstore]
-    [subzero.plugins.web-components :refer [IListenValue IBindValue] :as web-components]
-    [clojure.string :as str]
-    [goog.object :as gobj]))
+   [subzero.logger :as log]
+   [zero.impl.base :as base]
+   [zero.impl.base :refer [IDisposable dispose!]]
+   [zero.config :as zc]
+   [zero.core :as z]
+   [zero.impl.signals :as sig]
+   [subzero.core :as sz]
+   [subzero.rstore :as rstore]
+   [subzero.plugins.web-components :refer [IListenValue IBindValue] :as web-components]
+   [clojure.string :as str]
+   [goog.object :as gobj]))
 
 (defonce ^:private internal-state-sym (js/Symbol "zInternalState"))
 
@@ -78,6 +78,28 @@
 (defn patch-internal-state!
   [^js/HTMLElement element patch]
   (rstore/patch! (get-internal-state! element {}) (base/convert-patch patch)))
+
+(defn- dispatch!
+  [{host ::z/host :as ctx} event-name & {:keys [data target default bubble? cancelable? composed?]}]
+  (-> (js/Promise.resolve (or target host))
+    (.then
+      (fn [^js target]
+        (when
+         (.dispatchEvent target
+           (js/CustomEvent. (name event-name)
+             #js{:bubbles bubble?
+                 :cancelable cancelable?
+                 :composed composed?
+                 :detail data}))
+          (when (ifn? default)
+            (default ctx)))))))
+
+(defn- invoke!
+  [target method-name & args]
+  (-> (js/Promise.resolve target)
+    (.then
+      (fn [^js target]
+        (apply (gobj/get target (name method-name)) args)))))
 
 (defn listen-view
   [!db {:keys [sel evt] action :act :as props {!mut :mut} :state}]
@@ -218,14 +240,17 @@
   [!db]
   (zc/reg-effects !db
     ::patch-internal-state patch-internal-state!
-    ::set-internal-state set-internal-state)
-  
+    ::set-internal-state set-internal-state
+    ::dispatch (vary-meta dispatch! assoc ::z/contextual true)
+    ::invoke invoke!)
+
   (zc/reg-injections !db
     ::select-one select-one
     ::select-all select-all
     ::select-closest select-closest
-    ::shadow shadow)
-  
+    ::shadow shadow
+    ::field (fn [target field-name] (gobj/get target field-name)))
+
   (zc/reg-components !db
     ::echo
     {:props #{:vdom}
