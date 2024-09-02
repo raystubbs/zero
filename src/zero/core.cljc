@@ -26,36 +26,17 @@ Construct an action.
 
 ```
 
-Actions are declarative sequences of events.  They can be
-called, and have value semantics.  If called with a `js/Event`
-Zero will automatically extract an 'action context' from the
-event, which will be a map with the following:
+Any `nil`s in the effect sequence are ignored, and
+`seq?`s are concatenated into the effect sequence.
 
-```clojure
-:zero.core/data          ;; event data, extracted from original event via default or custom harvester
-:zero.core/event.target  ;; the event target
-:zero.core/current       ;; the element to which the action is attached
-:zero.core/event         ;; the original event, generally stale by this point
-:zero.core/host          ;; generally the component from which the action was rendered
-:zero.core/root          ;; generally the shadow root of the component from which the action was rendered
-```
-
-The context will be passed to injectors found within the action, which can extract useful info from
-the context and 'inject` it into the action's effect forms before each dispatch.
-
-This function may also take a 'props' map as its first argument, the following props are supported
-in a ClojureScript context:
+This function may also take a 'props' map as its first
+argument, the following props are supported in ClojureScript:
 
 - `:log?` - log various bits of useful info when this action is dispatched, useful for debugging
 - `:prevent-default?` - call `.preventDefault()` on the event, when dispatched with an event
 - `:stop-propagation?` - call `.stopPropagation()` on the event, when dispatched with an event
 - `:dispatch` - the dispatch strategy, one of (`:default`, `:immediate`, `:throttle`, `:debounce`)
 - `:delta` - if `:dispatch` is `:throttle` or `:debounce`, specifies the delta for each dispatch
-
-In a ClojureScript context, and when dispatching with an event, the action dispatch will be scheduled
-with `setTimeout` rather than invoked directly.  This improves consistency between throttled vs non-throttled
-dispatches; the event will always be stale.  Use `:immediate` dispatch to have the action dispatch immediately
-when called.
 " {:arglists
    '[[& effects]
      [{:keys [log? prevent-default? stop-propagation? dispatch delta]} & effects]]}
@@ -72,14 +53,6 @@ Construct a binding.
 [:input
  :value (bnd {:default \"foo\"} :db/something)]
 ```
-
-A binding is a declarative reference to a registered data stream.  When
-said data stream is active (has watchers) the binding can be deref'd for
-the current value of the stream; otherwise a deref yields nil.  Bindings
-are `IWatchable` and have value semantics.  When watching an instance of a
-binding, what's really being watched is the underlying data stream; so any
-instance is fine to add and remove watches, particular instances don't need
-to be held on to.
 " {:arglists
    '[[stream-key & args]
      [{:keys [default default-nil?]} stream-key & args]]}
@@ -91,10 +64,7 @@ to be held on to.
 
 (def ^{:arglists '[[injection-key & args]]}
   << "
-Creates an injection.  These can be placed in actions, bindings,
-and markup; and nested in other injectors. Injectors will be substituted
-by the value returned by the registered injection handler.
-
+Construct an injection.
 ```clojure
   (act :do-something (<< :inject-some-data))
   (bnd :something (<< :inject-some-data))
@@ -117,24 +87,24 @@ As a convenience, injectors can be chained without nesting:
     {::injector-fn true}))
 
 (defn sig "
-Create a signal.  For when a component needs to know about
-external happenstance.
+Construct a signal.
+```clojure
+(def my-sig (sig ::my-signal-key))
+  
+;; elsewhere
+[::some-component :focus-signal my-sig]
 
-    (def my-sig (sig ::my-signal-key))
-    
-    ;; elsewhere
-    [::some-component :focus-signal my-sig]
+;; elsewhere
+(zc/reg-components
+ ::some-component
+ {:props #{:focus-signal}
+  :view (fn [{:keys [focus-signal]}]
+         [:input
+          ::z/on {focus-signal (act [::focus (<<ctx ::z/current)])}])})
 
-    ;; elsewhere
-    (zc/reg-components
-     ::some-component
-     {:props #{:focus-signal}
-      :view (fn [{:keys [focus-signal]}]
-             [:input
-              ::z/on {focus-signal (act [::focus (<<ctx ::z/current)])}])})
-
-    ;; elsewhere
-    (my-sig)
+;; elsewhere
+(my-sig)
+```
 " [k]
   (Signal. k))
 
@@ -261,3 +231,15 @@ for a component with this name.
 (defn sig-unlisten
   [sig k]
   (sig/unlisten sig k))
+
+(defn css "
+A convenience function to wrap around CSS.  In a browser context
+(or any ClojureScript context with js/CSSStyleSheet) this will join
+the given strings and wrap them in a `CSSStyleSheet`.  Otherwise
+it'll just join the strings.
+"
+  [& ss]
+  (let [s (str/join ss)]
+    #?(:cljs (if js/CSSStyleSheet (doto (js/CSSStyleSheet.) (.replace s)) s)
+       :clj s)))
+
