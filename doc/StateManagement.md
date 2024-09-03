@@ -143,6 +143,21 @@ map can include:
   - `:after-render` - The effects will be executed after the next DOM reconciliation.
   - `:before-render` - The effects will be executed before the next DOM reconciliation.
 
+By default, effect functions receive only the arguments given in the action's effect vector.
+This makes it easier to define functions in a way that's agnostic to whether it's used as
+an effect handler or called directly.  However, it's sometimes useful to allow an effect to
+access the action's context.  This can be achieved by adding `:zero.core/contextual true` to
+the effect handler function's metadata:
+
+```clojure
+(zc/reg-effects
+  :my-contextual-effect
+  (with-meta
+    (fn [{root ::z/root host ::z/host :as ctx} & _args]
+      #_"Do Something")
+    {::z/contextual true}))
+```
+
 ## Bindings
 Bindings tap into reactive 'data streams.'  They're watchable and dereferenceable, and
 serve as a basis for reactivity in Zero.
@@ -173,6 +188,27 @@ serve as a basis for reactivity in Zero.
 ;; then when you're done, shut it unwatch, it'll shut down when the
 ;; watch count reaches 0
 (remove-watch (bnd ::my-random-data-stream 10) ::my-watch-key)
+```
+
+The `zero.util/derived` function can help create a data stream that derives
+its values from several other watchable things.
+
+```clojure
+(ns example
+  (:require
+    [zero.config :as zc]
+    [zero.util :as zu]
+    [zero.core :refer [bnd] :as z]))
+
+(defonce !src-1 (atom 0))
+
+(zc/reg-streams
+  :my-derived-stream
+  (zu/derived
+    (fn [[src-1 src-2] & _args]
+      (+ src-1 src-2))
+    !src-1
+    (bnd :src-2)))
 ```
 
 Bindings can be setup as state props on a component:
