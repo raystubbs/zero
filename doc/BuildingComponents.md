@@ -81,7 +81,7 @@ When we register a web component with a set of prop names (rather than a full ma
 all props are given the `:default` behavior.  Which means a JS property matching the
 prop name will be generated for the component class, and the component will watch for
 changes to any attribute matching the prop name.  The current prop value will reflect
-that last thing updated, out of the attribute and JS property.  For most components,
+the last thing updated, out of the attribute and JS property.  For most components,
 this is okay behavior for all props.
 
 ```clojure
@@ -263,6 +263,54 @@ Zero has `zero.dom/slotted-prop`.
           :body-els (zd/slotted-prop :slots #{:body})}
   :view my-card-view})
 ```
+
+## Signals
+Signals are a Zero feature that allow some behavior of a component to be triggered from
+the outside.  They're rarely needed, and should be avoided when possible... but when the
+need does come up, you'll be happy they're available.
+
+Signals, like Zero's state management types, have value semantics.  So they can be
+serialized/deserialized, compared, etc.  And they don't break the data-oriented
+nature of component `view` functions.
+
+Here's how they work.
+
+```clojure
+(ns example
+  (:require
+    [zero.core :refer [sig act] :as z]))
+
+;; remember, signals are data, so two instances with the same key
+;; are considered to be the same signal
+(def my-sig (sig ::my-unique-key))
+
+;; add a listener, any number of these can be added
+(z/sig-listen my-sig ::my-listen-key
+  (fn []
+    (println "my-sig has been invoked")))
+
+;; invoke the trigger
+(my-sig)
+
+;; remove the listener
+(z/sig-unlisten my-sig ::my-listen-key)
+```
+
+More conveniently, instead of manually listening/unlistening, just put the signal
+in the key position of an element's listener map in the vDOM.  This also provides
+access to an inferred context (much like when handling events), but without the
+event-specific keys.
+
+```clojure
+(defn- my-view
+  [{:keys [focus-sig]}]
+  [:input
+   :#on {focus-sig (act [::zd/invoke (<<ctx ::z/current) "focus"])}])
+```
+
+This is typically how signals will be used in practice.  The signal that's passed
+into the component as a prop value can be invoked externally, which will cause
+the internal input to be focused.
 
 ## TODO
 That's all I've got so far.  More to come.
