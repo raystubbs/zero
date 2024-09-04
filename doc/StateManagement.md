@@ -41,7 +41,7 @@ Injectors can be nested, and for convenience, can be chained.  So for example
 to `(<< :my-injector arg1 arg2 (<< :my-other-injector arg3))`.
 
 Injections are cached, so if the same injection with the same args is seen within
-the form undergoing injection; the action injection handler will only be invoked
+the form undergoing injection; the injection handler will only be invoked
 once, and the result reused.
 
 ## Actions
@@ -90,7 +90,7 @@ event handlers.
 (comment
   ;; This can now be used within another component like this  
   [:my-custom-input
-   :#on{:value (act [::log (<<ctx ::z/data)])}])
+   :#on {:value (act [::log (<<ctx ::z/data)])}])
 ```
 
 Actions can be invoked like any function.  They expect a context map, which all injections
@@ -110,7 +110,7 @@ a context map will be inferred, which will include the following:
 :zero.core/db           ;; the SubZero database instance associated with the component this action was rendered in
 ```
 
-Actions can also include an props map.  The overall usage for `zero.core/act` looks like:
+Actions can also include a props map.  The overall usage for `zero.core/act` looks like:
 
 ```clojure
 (act {:as props}? & effects)
