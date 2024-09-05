@@ -173,6 +173,35 @@ etc. to be controlled via the `#internals` prop on your component's `:root>`.
    :view my-view})
 ```
 
+## Rendering To HTML
+Use `subzero.plugins.html/html` to render SubZero markup to an HTML string, or
+`subzero.plugins.html/write-html` to render to a writer.
+
+In either case, the function takes a SubZero database as the first arg.  Generally
+you should pass `zero.config/!default-db` here, as this is where your Zero components
+will be registered by default.
+
+For `write-html`, the second arg is the writer.
+
+An option map can be given as the next argument, which can have a `:doctype`
+to be added at the start of the rendered HTML.
+
+All other args are interpreted as markup, and rendered as HTML.
+
+Attributes for registered Zero components will be rendered as [CDF](doc/ConciseDataFormat.md),
+so the structure of the data can be restored client-side.  This will happen automatically
+if the component is registered both when rendering the HTML, and as a web component on
+the client.
+
+The HTML renderer will also try to render event handlers (in `:#on` maps) as `:zero.dom/listen`
+components, which will try and register the event listener on the client-side.  But this will
+only work correctly if the event handlers (map values) are things that can be serialized and
+deserialized as something that'll work as an event handler... for example... actions.  Zero's
+client-side DOM utilities (from `zero.dom`) also need to be installed for this to work.
+
+Likewise, the HTML renderer will try to render bindings (from `:#bind` maps) as `:zero.dom/bind`
+components, which will try and setup the bindings client-side.
+
 ## The `:root>`
 A component's view function may return a special `[:root> ...]` as the top-level node
 of its vDOM.  This serves as a place to attach component-level customizations.
