@@ -118,9 +118,9 @@ your registered component will be used.
 
 When rendering to HTML, component views are rendered into
 [declarative shadow DOMs](https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM).
-Attributes for registered Zero components are serialized as [CDF (Concise Data Format)](./doc/CDF.md), which
-allows seamless transfer of structured data to browser-side implementations of the component; which will
-take control of the original HTML rendered DOM.
+Attributes for registered Zero components are serialized as
+[CDF (Concise Data Format)](./doc/ConciseDataFormat.md), which allows for seamless
+transfer of structured data to browser-side component implementations.
 
 ## Learning
 Here are a few resources to help learn the basics:
