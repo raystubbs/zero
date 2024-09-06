@@ -5,7 +5,7 @@
    [zero.impl.base :refer [str-writer str-writer->str write]])
   #?(:clj
      (:import
-       [java.util ArrayList Date])))
+      [java.util ArrayList Date])))
 
 #?(:clj (defn- mut-list [] (ArrayList.))
    :cljs (defn- mut-list [] #js[]))
@@ -71,7 +71,7 @@
 
             \e
             (case
-              :exponent
+             :exponent
               (throw (ex-info "found extra 'e' in number" {:idx i :char c})))
 
             (\space \newline \return \tab \[ \] \{ \} \( \) \`)
@@ -223,6 +223,7 @@
    'bnd z/bnd
    '<<  z/<<
    'set (fn [& xs] (set xs))
+   'err (fn [& args] (ex-info (first args) (second args)))
    'inst #?(:cljs #(js/Date. %) :clj #(Date. ^String %))})
 
 (defn read-str
@@ -280,7 +281,11 @@
     (list 'inst #?(:cljs (.toISOString x) :clj (.toString x)))
 
     :else
-    x))
+    (if-some [msg (ex-message x)]
+      (if-some [data (ex-data x)]
+        (list 'err msg data)
+        (list 'err msg))
+      x)))
 
 (defn- max-quotes-count
   [s]

@@ -101,6 +101,13 @@
       (fn [^js target]
         (apply (gobj/get target (name method-name)) args)))))
 
+(defn- set-field!
+  [target field-name value]
+  (-> (js/Promise.resolve target)
+    (.then
+      (fn [^js target]
+        (gobj/set target (name field-name) value)))))
+
 (defn listen-view
   [!db {:keys [sel evt] action :act :as props {!mut :mut} :state}]
   (let [action
@@ -177,7 +184,7 @@
           (catch :default ex
             (reject ex)))))))
 
-(defn select-one
+(defn inj-select-one
   [{^js/Node root ::z/root !db ::z/db}
    selector
    & {:keys [deep? delay from]}]
@@ -195,7 +202,7 @@
       (-> ^js/Promise from (.then #(delayed !db delay select-fn %)))
       (delayed !db delay select-fn (or from root)))))
 
-(defn select-all
+(defn- inj-select-all
   [{^js/Node root ::z/root !db ::z/db}
    selector
    & {:keys [deep? delay from]}]
@@ -213,7 +220,7 @@
       (-> ^js/Promise from (.then #(delayed !db delay select-fn %)))
       (delayed !db delay select-fn (or from root)))))
 
-(defn select-closest
+(defn- inj-select-closest
   [{^js/Node root ::z/root ^js/Node current ::z/current !db ::z/db}
    selector
    & {:keys [breach? delay from]}]
@@ -230,11 +237,17 @@
       (-> ^js/Promise from (.then #(delayed !db delay select-fn root %)))
       (delayed !db delay select-fn root (or from current)))))
 
-(defn shadow
+(defn- inj-shadow
   [_ target]
   (if (instance? js/Promise target)
     (-> target (.then #(.-shadowRoot ^js target)))
     (.-shadowRoot ^js target)))
+
+(defn- inj-field
+  [_ ^js target field-name]
+  (if-not (instance? js/Promise target)
+    (gobj/get target (name field-name))
+    (.then target (fn [^js target] (gobj/get target (name field-name))))))
 
 (defn install!
   [!db]
@@ -242,14 +255,15 @@
     ::patch-internal-state patch-internal-state!
     ::set-internal-state set-internal-state
     ::dispatch (vary-meta dispatch! assoc ::z/contextual true)
-    ::invoke invoke!)
+    ::invoke invoke!
+    ::set-field set-field!)
 
   (zc/reg-injections !db
-    ::select-one select-one
-    ::select-all select-all
-    ::select-closest select-closest
-    ::shadow shadow
-    ::field (fn [target field-name] (gobj/get target field-name)))
+    ::select-one inj-select-one
+    ::select-all inj-select-all
+    ::select-closest inj-select-closest
+    ::shadow inj-shadow
+    ::field inj-field)
 
   (zc/reg-components !db
     ::echo

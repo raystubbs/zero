@@ -1,5 +1,5 @@
 (ns zero.tools.portfolio
-  #?(:cljs (:require-macros net.xledger.ui.tooling.portfolio))
+  #?(:cljs (:require-macros zero.tools.portfolio))
   (:require
    #?(:clj [portfolio.core :as portfolio])
    [subzero.plugins.html :as html]
