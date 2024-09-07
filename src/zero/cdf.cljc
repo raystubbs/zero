@@ -376,7 +376,7 @@
         (or (= (nth x 0) \`) (= (nth x (dec (count x))) \`))
         (throw (ex-info "back ticks (`) aren't allowed at the start or end of strings" {:x x}))
 
-        (and top? (case (nth x 0) (\( \[ \{ \:) false true))
+        (and top? (case (nth x 0) (\( \[ \{ \: \0 \1 \2 \3 \4 \5 \6 \7 \8 \9) false true))
         (write w x)
 
         :else
