@@ -84,7 +84,7 @@ A simple bullet list.
        [:button.option
         :#on {:click (act [::zd/dispatch :value :data (:value option)])}
         [:div.bullet
-         ::z/class (when (= (:value option) value) :selected)
+         :#class (when (= (:value option) value) :selected)
          (when (= (:value option) value)
            [:div.iris
             :#style {:height "0.75rem" :width "0.75rem"}])]
