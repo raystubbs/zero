@@ -82,7 +82,7 @@ A simple bullet list.
    (map
      (fn [option]
        [:button.option
-        :#on {:click (act [::zd/dispatch :value (:value option)])}
+        :#on {:click (act [::zd/dispatch :value :data (:value option)])}
         [:div.bullet
          ::z/class (when (= (:value option) value) :selected)
          (when (= (:value option) value)
